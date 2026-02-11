@@ -21,7 +21,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 * **顺序执行**：必须按照 INIT → EXPORT → COMPILE → VERIFY → SIMULATION → RUNONBOARD 顺序执行。
 * **强制确认**：在每个标记有 **STOP** 的地方必须获得用户确认或输入。
-* **状态记录**：所有执行过程、错误分析必须记录在 `task.md` 和 `analysis.md` 中。
+* **状态记录**：所有执行过程、错误分析必须记录在 `task.md` 和 `analysis.md` 中。其中`task.md`的模板参考 @task.md
 * **环境隔离**：所有操作必须在指定的任务工作目录下进行。所有的debug文件(编译输出， 仿真文件， 调试python脚本)，中间文件必须放在 "$TASK_DIR/cache" 目录下，禁止污染环境. 预期任务工作目录下结构如下:
   ```
       TASK_DIR: 
