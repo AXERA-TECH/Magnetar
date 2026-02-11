@@ -1,5 +1,5 @@
 
-# AX-Samples 模型部署工作流 (AX-Samples Deployment Workflow)
+# Magnetar 模型部署工作流 (Magnetar Deployment Workflow)
 
 该工作流旨在将原始浮点模型转换为可运行在 AX 芯片上的量化模型，并在硬件开发板上完成验证。
 

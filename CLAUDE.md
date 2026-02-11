@@ -2,24 +2,35 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-# 模型导出
+# 工作流定义
 
-默认使用 `source /home/xiguapro/workspace/cli_yaquantize/.venv/bin/activate` 
-如果环境不满足，则需要使用 uv 重新安装环境
+工作流旨在通过严格顺序执行的工作流节点将原始浮点模型转换为可运行在 AX 芯片上的量化模型，并在硬件开发板上完成验证。
 
+## 工作流节点
 
-# Pulsar2
+ - INIT: 初始化工作环境，新建工作目录
+ - EXPORT: 导出onnx模型
+ - COMPILE: 用pulsar2工具链编译模型
+ - VERIFY: 精度验证
+ - SIMULATION: 仿真运行
+ - RUNONBOARD: 上板运行
 
-## 使用
-文档说明: https://pulsar2-docs.readthedocs.io/zh-cn/latest/
-参考json: templates/simple_pulsar2_config.json
-禁止配置 "highest_mix_precision": true,
-遇到精度问题，首先查看 `https://pulsar2-docs.readthedocs.io/zh-cn/latest/appendix/precision_debug_guides.html` 排查问题；
+## 工作流准则
 
+**核心原则：**
 
-## 环境
-```
-source /home/xiguapro/workspace/cli_yaquantize/.venv/bin/activate
-source /home/xiguapro/workspace/npu-codebase/script/npu_dev
-```
-
+* **顺序执行**：必须按照 INIT → EXPORT → COMPILE → VERIFY → SIMULATION → RUNONBOARD 顺序执行。
+* **强制确认**：在每个标记有 **STOP** 的地方必须获得用户确认或输入。
+* **状态记录**：所有执行过程、错误分析必须记录在 `task.md` 和 `analysis.md` 中。
+* **环境隔离**：所有操作必须在指定的任务工作目录下进行。所有的debug文件(编译输出， 仿真文件， 调试python脚本)，中间文件必须放在 "$TASK_DIR/cache" 目录下，禁止污染环境. 预期任务工作目录下结构如下:
+  ```
+      TASK_DIR: 
+            - ax-samples/
+            - cache/
+            - compile/
+            - origin/
+            - logs/
+            - analysis.md
+            - task.md
+  ```
+* **问题记录**：在调试时遇到的所有问题，解决后都放到 `issues` 目录下, 新建一个文档， 命名规则参照为`序号_模型名_阶段_问题简述.md`，如`000_mobilenet_export_acc_error.md`；
