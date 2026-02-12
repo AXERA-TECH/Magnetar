@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+所有回复均采用中文
+
 # 工作流定义
 
 工作流旨在通过严格顺序执行的工作流节点将原始浮点模型转换为可运行在 AX 芯片上的量化模型，并在硬件开发板上完成验证。
