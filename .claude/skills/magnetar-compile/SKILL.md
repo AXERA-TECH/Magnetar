@@ -5,25 +5,16 @@ context: fork
 agent: Plan
 ---
 
+工作目录: $TASK_DIR/compile
+
 # Pulsar2
 
-**使用过程不允许修改Pulsar2源码**
-
-## 环境
-1. 在~/.bashrc中寻找pulsar2
-2. 在$home目录下寻找npu-codebase
-3. 扫描conda env寻找合适环境
-4. 用uv在npu-codebase中安装环境
-
-寻找npu-codebase，阅读README确认使用方法
-
-执行 `pulsar2 --version`。如果不可用，**STOP** → "pulsar2 命令未找到。是否继续？(y/n)"
-
 ## 使用
-文档说明: https://pulsar2-docs.readthedocs.io/zh-cn/latest/
-参考json: [templates/simple_pulsar2_config.json](templates/simple_pulsar2_config.json)
-禁止配置 "highest_mix_precision": true,
-遇到精度问题，首先查看 `https://pulsar2-docs.readthedocs.io/zh-cn/latest/appendix/precision_debug_guides.html` 排查问题；
+1. 文档说明: https://pulsar2-docs.readthedocs.io/zh-cn/latest/
+2. 参考json: [templates/simple_pulsar2_config.json](templates/simple_pulsar2_config.json)
+3. 禁止配置 "highest_mix_precision": true,
+4. 遇到精度问题，首先查看 `https://pulsar2-docs.readthedocs.io/zh-cn/latest/appendix/precision_debug_guides.html` 排查问题；
+5. 使用pulsar2的最新docker镜像, 镜像可从HuggingFace获取: https://hf-mirror.com/AXERA-TECH/Pulsar2，可通过hf_hub_download下载
 
 ## 配置
 针对onnx静态图模型写转换配置json
@@ -33,6 +24,7 @@ agent: Plan
 ## 转换
 执行pulsar2 build
 
+必要的中间产物放在$TASK_DIR/cache下
 若转换失败，记录错误原因，如果是onnx op不支持，带着错误信息回到EXPORT流程修改onnx模型
 
 # task记录
@@ -42,3 +34,6 @@ agent: Plan
 2. 量化对分表（如有）
 3. 模型的MACS
 4. 模拟的max cycles
+5. docker环境, pulsar2的镜像版本
+
+完成后进入VERIFY阶段

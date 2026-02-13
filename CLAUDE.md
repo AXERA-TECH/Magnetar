@@ -13,26 +13,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
  - INIT: 初始化工作环境，新建工作目录
  - EXPORT: 导出onnx模型
  - COMPILE: 用pulsar2工具链编译模型
- - VERIFY: 精度验证
- - SIMULATION: 仿真运行
+ - SIMULATE: 仿真运行
  - RUNONBOARD: 上板运行
 
 ## 工作流准则
 
 **核心原则：**
 
-* **顺序执行**：必须按照 INIT → EXPORT → COMPILE → VERIFY → SIMULATION → RUNONBOARD 顺序执行。
+* **顺序执行**：必须按照 INIT → EXPORT → COMPILE → SIMULATE → RUNONBOARD 顺序执行。
 * **强制确认**：在每个标记有 **STOP** 的地方必须获得用户确认或输入。
 * **状态记录**：所有执行过程、错误分析必须记录在 `task.md` 和 `analysis.md` 中。其中`task.md`的模板参考 @task.md
-* **环境隔离**：所有操作必须在指定的任务工作目录下进行。所有的debug文件(编译输出， 仿真文件， 调试python脚本)，中间文件必须放在 "$TASK_DIR/cache" 目录下，禁止污染环境. 预期任务工作目录下结构如下:
-  ```
-      TASK_DIR: 
-            - ax-samples/
-            - cache/
-            - compile/
-            - origin/
-            - logs/
-            - analysis.md
-            - task.md
-  ```
+* **环境隔离**：所有操作必须在指定的任务工作目录下进行。
 * **问题记录**：在调试时遇到的所有问题，解决后都放到 `issues` 目录下, 新建一个文档， 命名规则参照为`序号_模型名_阶段_问题简述.md`，如`000_mobilenet_export_acc_error.md`；

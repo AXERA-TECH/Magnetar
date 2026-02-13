@@ -2,14 +2,13 @@
 description: Orchestrator of the workflow, manage workflow status and pass arguments.
 ---
 
-按照Workflow节点: INIT → EXPORT → COMPILE → VERIFY → SIMULATION → RUNONBOARD 严格顺序执行
+按照Workflow节点: INIT → EXPORT → COMPILE → SIMULATE → RUNONBOARD 严格顺序执行
 
 每个节点调用对应的Skill:
  - INIT: magnetar-init
  - EXPORT: magnetar-export
  - COMPILE: magnetar-compile
- - VERIFY: magnetar-verify
- - SIMULATION: magnetar-simulate
+ - SIMULATE: magnetar-simulate
  - RUNONBOARD: magnetar-runonboard
 
 Skill参数，作为公共参数传入每个Skill:

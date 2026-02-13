@@ -61,6 +61,7 @@ agent: Plan
 3. export-dynamic-onnx.md， export-dynamic-onnx.py的使用说明 
 4. workaround.md，如实现过程涉及为导出成功作出的取舍或限制，应在此处说明
 5. 导出的onnx模型, 放在cache下
+6. 与torch对分的脚本
 
 脚本放到export下
 若导出失败，向用户提出帮助，是否需要启动多个子agent头脑风暴提出最佳方案。
@@ -82,6 +83,7 @@ agent: Plan
 3. export-static-onnx.md， export-dynamic-onnx.py的使用说明 
 4. 更新workaround.md，如实现过程涉及为导出成功作出的取舍或限制，应在此处说明
 5. 导出的onnx模型, 放在cache下
+6. 与torch对分的脚本
 
 脚本放到export下
 若导出失败，向用户提出帮助，是否需要启动多个子agent头脑风暴提出最佳方案
@@ -110,6 +112,8 @@ calib_data/
 数据生成完成后，将每个input_name下的数据压缩打包:
 ```
 calib_data/
+    input_names[0]/
+    input_names[1]/
     input_names[0].tar.gz
     input_names[1].tar.gz
 ```
@@ -121,3 +125,5 @@ calib_data放到export下
 在task.md中记录:
 1. onnx静态图模型路径
 2. 量化校准集路径
+
+完成后进入COMPILE阶段
