@@ -1,0 +1,48 @@
+{
+  "input": "/path/to/model_static.onnx",
+  "output_dir": "/path/to/compile/output",
+  "output_name": "compiled.axmodel",
+  "work_dir": "/path/to/compile/work",
+  "model_type": "ONNX",
+  "target_hardware": "AX650",
+  "npu_mode": "NPU1",
+  "input_shapes": "input:1x3x224x224",
+  "onnx_opt": {
+    "disable_onnx_optimization": false,
+    "enable_onnxsim": false,
+    "model_check": true
+  },
+  "quant": {
+    "input_configs": [
+      {
+        "tensor_name": "input",
+        "calibration_dataset": "/path/to/calib_data/input.tar.gz",
+        "calibration_format": "Numpy",
+        "calibration_size": 32,
+        "calibration_mean": [],
+        "calibration_std": []
+      }
+    ],
+    "calibration_method": "MinMax",
+    "precision_analysis": false,
+    "precision_analysis_method": "PerLayer",
+    "precision_analysis_mode": "Reference",
+    "highest_mix_precision": false
+  },
+  "input_processors": [
+    {
+      "tensor_name": "input",
+      "tensor_format": "RGB",
+      "tensor_layout": "NCHW",
+      "src_format": "RGB",
+      "src_layout": "NCHW",
+      "src_dtype": "FP32",
+      "mean": [],
+      "std": []
+    }
+  ],
+  "compiler": {
+    "check": 0,
+    "check_mode": "CheckOutput"
+  }
+}

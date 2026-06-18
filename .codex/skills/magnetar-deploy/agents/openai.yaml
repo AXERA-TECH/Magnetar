@@ -1,0 +1,7 @@
+interface:
+  display_name: "Magnetar Deploy"
+  short_description: "Pulsar2 AXMODEL deployment workflow"
+  default_prompt: "Use $magnetar-deploy to deploy repo=[path or git URL] to AX650 with task_dir=[work directory]."
+
+policy:
+  allow_implicit_invocation: true
