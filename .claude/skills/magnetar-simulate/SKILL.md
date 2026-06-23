@@ -12,4 +12,4 @@ agent: Plan
 4. 生成simulate-report.md记录测试过程和结果
 
 **STOP** → "仿真精度是否达标？(y/n)"
-确保相似度可接受以后，进入SIMULATION阶段
+确保相似度可接受以后，进入RUNONBOARD阶段
