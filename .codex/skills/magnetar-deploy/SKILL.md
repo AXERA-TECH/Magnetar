@@ -1,11 +1,11 @@
 ---
 name: magnetar-deploy
-description: Deploy floating-point AI models to AXera AX chips with Pulsar2. Use when Codex is asked to run the Magnetar workflow, export ONNX, prepare calibration data, compile AXMODEL, simulate or compare ONNX vs AXMODEL outputs, debug Pulsar2 quantization/precision issues, or run a model on an AX development board.
+description: Deploy floating-point AI models to AXera AX chips with Pulsar2. Use when Codex is asked to run the Magnetar workflow, export ONNX, prepare calibration data, compile AXMODEL, simulate or compare ONNX vs AXMODEL outputs, debug Pulsar2 quantization/precision issues, run a model on an AX development board, or package deployable demos.
 ---
 
 # Magnetar Deploy
 
-始终用中文与用户沟通。按 `INIT -> EXPORT -> COMPILE -> SIMULATE -> RUNONBOARD` 顺序执行，不得跳阶段。遇到 `STOP` 必须暂停等待用户确认。
+始终用中文与用户沟通。按 `INIT -> EXPORT -> COMPILE -> SIMULATE -> RUNONBOARD` 顺序执行，不得跳阶段。`PACKAGE` 只在 RUNONBOARD 验证通过且用户确认后执行。遇到 `STOP` 必须暂停等待用户确认。
 
 详细阶段说明见 [references/workflow.md](references/workflow.md)。在执行任一阶段前先读取该文件。
 
@@ -23,11 +23,15 @@ description: Deploy floating-point AI models to AXera AX chips with Pulsar2. Use
 
 ## 执行规则
 
-- 所有命令必须在对应阶段目录内执行。
+- 所有阶段工作必须在对应阶段目录内执行。
 - 所有脚本、日志、中间产物、调试样本必须写入 `TASK_DIR` 下的阶段目录或 `cache/`。
 - 原始工程放入 `TASK_DIR/origin/`，不要直接修改上游工程；需要 patch 时优先使用 monkeypatch 或复制后的工作副本。
 - 每完成一个关键动作，更新 `TASK_DIR/task.md`；每次分析错误、做出取舍、修改配置，都更新 `TASK_DIR/analysis.md`。
 - 修复过的可复用问题必须沉淀到仓库根目录 `issues/`。
+- 可复用模板位于 `assets/templates/`：
+  - Pulsar2 配置模板：`assets/templates/pulsar2_config.json`、`assets/templates/compile/`
+  - 导出示例：`assets/templates/export/`
+  - 板端连接辅助：`assets/templates/runonboard/`
 
 ## 质量门槛
 
@@ -36,6 +40,7 @@ description: Deploy floating-point AI models to AXera AX chips with Pulsar2. Use
 - 校准数据、ONNX 推理输入、AXMODEL 仿真输入必须保持同一预处理链。
 - Pulsar2 配置禁止使用 `"highest_mix_precision": true`。
 - 精度判断必须结合任务语义，不要只看相对误差。
+- 遇到导出复杂模型、Transformer、KV Cache 或 Stateful 模型时，按需读取 `references/best_practice.md`。
 
 ## STOP 行为
 
