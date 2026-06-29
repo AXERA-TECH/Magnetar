@@ -1,0 +1,395 @@
+workflow:
+  schema_version: "1.0"
+  name: axmodel-pipeline
+  entry_skill: skills/axmodel-pipeline/SKILL.md
+  mode: guided
+  task_type: hybrid
+
+  requirement:
+    goal: "将任意来源模型转为axmodel并生成Python/C++ SDK"
+    output:
+      format: "axmodel + Python SDK + C++ SDK"
+      destination: "TASK_DIR/package/"
+      consumer: both
+    constraints:
+      technology: [pulsar2, axengine, huggingface_hub, onnx]
+      human_approval_required: true
+    acceptance:
+      checks:
+        - axmodel通过pulsar2 simulate精度验证
+        - Python SDK可import并推理
+        - C++ SDK通过cmake编译
+      required_artifacts:
+        - TASK_DIR/compile/*.axmodel
+        - TASK_DIR/sdk/python/
+        - TASK_DIR/sdk/cpp/
+    assumptions:
+      - 模型最终导出为静态shape ONNX
+      - 目标芯片 AX650 或 AX620E
+      - HF私有模型需用户提供 HF_TOKEN
+
+  capabilities:
+    - id: source-git
+      purpose: clone git仓库
+      source: existing
+      permissions: [network, filesystem]
+      required: false
+
+    - id: source-hf
+      purpose: 下载HuggingFace模型
+      source: install  # pip install huggingface_hub
+      permissions: [network, filesystem]
+      required: false
+
+    - id: pulsar2
+      purpose: 编译axmodel
+      source: existing
+      skill_path: .codex/skills/magnetar-deploy
+      permissions: [filesystem, docker_or_native]
+      required: true
+
+    - id: axengine
+      purpose: 运行axmodel推理（SDK生成依赖其API签名）
+      source: existing
+      permissions: [filesystem]
+      required: true
+
+    - id: onnx-inspector
+      purpose: 提取模型I/O元数据用于SDK生成
+      source: install  # pip install onnx
+      permissions: [filesystem]
+      required: true
+
+    - id: cmake
+      purpose: 验证C++ SDK编译
+      source: existing
+      permissions: [filesystem]
+      required: false
+
+    - id: aarch64-toolchain
+      purpose: 交叉编译C++ SDK到aarch64目标板
+      source: existing  # 需要 aarch64-linux-gnu-g++ 或用户提供toolchain.cmake
+      permissions: [filesystem]
+      required: false   # 降级时仅生成源码，不执行编译
+
+    - id: optimum
+      purpose: HuggingFace transformers模型ONNX导出
+      source: install   # pip install optimum[exporters]
+      permissions: [filesystem, network]
+      required: false   # 仅transformers格式模型需要
+
+  inputs:
+    - id: SOURCE
+      type: url
+      required: true
+      source: user
+      description: >
+        模型来源。支持三种格式：
+        - git://github.com/xxx/repo  或 https://github.com/...
+        - hf://org/model-name[@revision]
+        - /local/path/to/model.pt|.onnx|目录
+      validation:
+        - 必须以 git:// / https://github / hf:// / 本地路径之一开头
+
+    - id: TARGET_HARDWARE
+      type: text
+      required: true
+      source: user
+      validation: [enum: [AX650, AX620E]]
+
+    - id: MODEL_NAME
+      type: text
+      required: false
+      source: user
+      description: 未提供时从SOURCE basename推断
+
+    - id: TASK_DIR
+      type: directory
+      required: false
+      source: generated
+      description: 未提供时自动生成 todos/work/TIMESTAMP-MODEL_NAME/
+
+    - id: HF_TOKEN
+      type: credential
+      required: false
+      source: environment  # env var HF_TOKEN
+      description: HuggingFace私有模型访问令牌
+
+    - id: SDK_LANG
+      type: text
+      required: false
+      source: user
+      description: "SDK语言：python | cpp | both（默认both）"
+
+    - id: TOOLCHAIN_FILE
+      type: file
+      required: false
+      source: user
+      description: >
+        C++交叉编译工具链文件路径（aarch64-linux-gnu toolchain.cmake）。
+        未提供时自动搜索 /usr/bin/aarch64-linux-gnu-g++；
+        若不可用则降级：生成源码但跳过编译验证。
+
+  outputs:
+    - id: axmodel
+      type: file
+      destination: TASK_DIR/compile/*.axmodel
+      required: true
+      validation: [file_exists, size_gt_0]
+
+    - id: python_sdk
+      type: directory
+      destination: TASK_DIR/sdk/python/
+      required: false
+      validation: [importable]
+
+    - id: cpp_sdk
+      type: directory
+      destination: TASK_DIR/sdk/cpp/
+      required: false
+      validation: [cmake_build_ok]
+
+    - id: package
+      type: directory
+      destination: TASK_DIR/package/
+      required: true
+      validation: [contains_axmodel, contains_sdk]
+
+  state_machine:
+    initial: draft
+    states: [draft, awaiting_user, ready, running, validating, retrying, rolling_back, degraded, blocked, failed, succeeded]
+    terminal: [blocked, failed, succeeded]
+    transitions:
+      - {from: draft, to: awaiting_user, when: "SOURCE或TARGET_HARDWARE缺失"}
+      - {from: draft, to: ready, when: "必要参数齐全"}
+      - {from: ready, to: running, when: "执行开始"}
+      - {from: running, to: validating, when: "所有必要步骤完成"}
+      - {from: validating, to: succeeded, when: "所有验收检查通过"}
+      - {from: validating, to: retrying, when: "可恢复失败且重试预算剩余"}
+      - {from: retrying, to: running, when: "修复步骤已安排"}
+      - {from: running, to: degraded, when: "可选能力失败且可降级输出"}
+      - {from: running, to: blocked, when: "缺少必要凭证或外部资源"}
+      - {from: running, to: failed, when: "不可恢复错误"}
+
+  steps:
+    - id: validate-source
+      kind: gate
+      description: 解析并验证SOURCE格式，推断MODEL_NAME和source_type
+      depends_on: []
+      inputs: [SOURCE, MODEL_NAME]
+      outputs: [source_type, resolved_model_name]
+      visibility: hidden
+      on_failure:
+        action: ask_user
+
+    - id: init
+      kind: script
+      description: 创建TASK_DIR目录结构，写入task.md初始状态
+      depends_on: [validate-source]
+      inputs: [MODEL_NAME, TARGET_HARDWARE, TASK_DIR]
+      outputs: [TASK_DIR]
+      visibility: user_visible
+      on_failure:
+        action: fail
+
+    - id: acquire
+      kind: agent
+      skill: skills/axmodel-pipeline/hidden/acquire/SKILL.md
+      description: 按source_type下载或定位模型到TASK_DIR/origin/
+      depends_on: [init]
+      inputs: [SOURCE, source_type, HF_TOKEN, TASK_DIR]
+      outputs: [origin_path, model_file_candidates]
+      timeout_seconds: 600
+      retry:
+        max_attempts: 2
+        retry_on: [network_timeout, partial_download]
+        backoff: fixed
+      on_failure:
+        action: ask_user
+      visibility: user_visible
+
+    - id: export
+      kind: agent
+      skill: .codex/skills/magnetar-deploy/agents/export
+      description: 将原始模型导出为静态shape ONNX，验证shape和算子兼容性
+      depends_on: [acquire]
+      inputs: [origin_path, model_file_candidates, TARGET_HARDWARE, TASK_DIR]
+      outputs: [onnx_path, model_meta]  # model_meta含I/O names/shapes/dtypes
+      retry:
+        max_attempts: 3
+        retry_on: [shape_error, opset_mismatch]
+        backoff: none
+      on_failure:
+        action: ask_user
+      visibility: user_visible
+
+    - id: compile
+      kind: agent
+      skill: .codex/skills/magnetar-deploy/agents/compile
+      description: pulsar2编译ONNX为axmodel，生成量化配置
+      depends_on: [export]
+      inputs: [onnx_path, TARGET_HARDWARE, TASK_DIR]
+      outputs: [axmodel_path]
+      retry:
+        max_attempts: 3
+        retry_on: [quantization_error, precision_drop]
+        backoff: none
+      on_failure:
+        action: ask_user
+      visibility: user_visible
+
+    - id: simulate
+      kind: agent
+      skill: .codex/skills/magnetar-deploy/agents/simulate
+      description: 仿真精度对比，ONNX vs axmodel余弦相似度/误差
+      depends_on: [compile]
+      inputs: [onnx_path, axmodel_path, TASK_DIR]
+      outputs: [accuracy_report, simulate_passed]
+      retry:
+        max_attempts: 2
+        retry_on: [precision_drop]
+        backoff: none
+      on_failure:
+        action: ask_user
+      visibility: user_visible
+
+    - id: gate-simulate
+      kind: gate
+      description: "精度达标时自动继续；仅精度不达标时STOP"
+      depends_on: [simulate]
+      pass_when: [simulate_passed == true]   # 自动通过，无需用户确认
+      fail_when: [simulate_passed == false]
+      on_pass: sdk-gen-python
+      on_fail: compile  # STOP: 展示报告，询问重编策略
+      visibility: user_visible
+
+    - id: sdk-gen-python
+      kind: agent
+      skill: skills/axmodel-pipeline/hidden/sdk-gen/SKILL.md
+      description: 基于model_meta生成Python推理SDK（axengine封装）
+      depends_on: [gate-simulate]
+      parallel_group: sdk-gen
+      inputs: [model_meta, axmodel_path, MODEL_NAME, TARGET_HARDWARE]
+      outputs: [python_sdk_path]
+      timeout_seconds: 120
+      retry:
+        max_attempts: 2
+        retry_on: [import_error, syntax_error]
+        backoff: none
+      on_failure:
+        action: degrade
+      visibility: summarized
+
+    - id: sdk-gen-cpp
+      kind: agent
+      skill: skills/axmodel-pipeline/hidden/sdk-gen/SKILL.md
+      description: 基于model_meta生成C++ SDK（ax_engine C API封装）
+      depends_on: [gate-simulate]
+      parallel_group: sdk-gen
+      inputs: [model_meta, axmodel_path, MODEL_NAME, TARGET_HARDWARE]
+      outputs: [cpp_sdk_path]
+      timeout_seconds: 180
+      retry:
+        max_attempts: 2
+        retry_on: [cmake_error, compile_error]
+        backoff: none
+      on_failure:
+        action: degrade
+      visibility: summarized
+
+    - id: sdk-validate
+      kind: gate
+      description: 验证Python SDK可import、C++ SDK通过cmake configure
+      depends_on: [sdk-gen-python, sdk-gen-cpp]
+      parallel_group: null  # join点
+      pass_when: [at_least_one_sdk_valid]
+      fail_when: [both_sdks_failed]
+      on_pass: gate-runonboard
+      on_fail: fail
+      visibility: user_visible
+
+    - id: gate-runonboard
+      kind: gate
+      description: "BOARD已提供则自动执行RUNONBOARD；未提供则直接PACKAGE，无需询问"
+      depends_on: [sdk-validate]
+      pass_when: [BOARD != null]   # 自动判断，无用户交互
+      fail_when: [BOARD == null]
+      on_pass: runonboard
+      on_fail: package
+      visibility: user_visible
+
+    - id: runonboard
+      kind: agent
+      skill: .codex/skills/magnetar-deploy/agents/runonboard
+      description: 上板部署axmodel，采集板端推理结果
+      depends_on: [gate-runonboard]
+      inputs: [axmodel_path, BOARD, TASK_DIR]
+      outputs: [onboard_report]
+      timeout_seconds: 300
+      retry:
+        max_attempts: 2
+        retry_on: [ssh_timeout, transfer_error]
+        backoff: fixed
+      on_failure:
+        action: ask_user
+      visibility: user_visible
+
+    - id: package
+      kind: script
+      description: 打包axmodel + SDK + 示例脚本 + 报告到TASK_DIR/package/
+      depends_on: [sdk-validate]  # runonboard为可选，不阻塞package
+      inputs: [axmodel_path, python_sdk_path, cpp_sdk_path, accuracy_report, TASK_DIR]
+      outputs: [package_path]
+      visibility: user_visible
+      on_failure:
+        action: fail
+
+  gates:
+    - id: gate-simulate
+      kind: approval
+      depends_on: [simulate]
+      pass_when: ["精度达标（余弦相似度 > 0.99 或用户确认）"]
+      fail_when: ["精度不达标且用户要求重新编译"]
+      on_pass: sdk-gen-python
+      on_fail: compile
+
+    - id: gate-runonboard
+      kind: approval
+      depends_on: [sdk-validate]
+      pass_when: [用户确认需要上板]
+      fail_when: [用户跳过上板]
+      on_pass: runonboard
+      on_fail: package
+
+  failure_policy:
+    default_action: ask_user
+    max_total_attempts: 3
+    rollback_required_for: []
+    ask_user_for:
+      - 精度不达标时的重编策略
+      - 模型格式无法自动识别时
+      - HF_TOKEN缺失访问私有模型时
+      - 上板SSH连接失败时
+    degraded_output_allowed: true  # SDK生成失败时仍可输出axmodel
+
+  observability:
+    progress_updates: milestone
+    audit_log:
+      enabled: true
+      include_hidden_steps: true
+    artifacts:
+      record_intermediate_outputs: true
+      retention: workflow-local
+
+  completion:
+    success_when:
+      - axmodel文件存在且size>0
+      - simulate_passed == true
+      - 至少一种SDK验证通过
+    failure_when:
+      - pulsar2编译连续失败3次
+      - ONNX导出失败且无法修复
+    final_response:
+      include_artifacts: true
+      include_assumptions: true
+      include_limitations: true

@@ -1,32 +1,57 @@
 # Magnetar
 
-Pulsar2 Agent 工作流，目标是帮助用户完成：
+将任意来源模型转换为 AX 芯片 axmodel，并自动生成 Python/C++ 推理 SDK。
 
-`开源或自研模型 -> ONNX -> Pulsar2 编译 -> AXMODEL -> 仿真验证 -> 板端运行`
+## 流程
 
-仓库同时保留 Claude 版工作流，并新增 Codex 版工作流。
-
-# 快速开始
-
-## Codex
-
-本仓库提供项目级 Codex 规则和可复用 skill：
-
-- `AGENTS.md`: Codex 进入本仓库后的默认约束。
-- `.codex/skills/magnetar-deploy/SKILL.md`: Magnetar 部署工作流。
-
-在 Codex 中可以直接说：
-
-```text
-使用 magnetar-deploy，把 repo=[本地路径或 git repo] 部署到 AX650，task_dir=[工作目录]
+```
+SOURCE (git / HuggingFace / 本地)
+  └→ ACQUIRE → INIT → EXPORT → COMPILE → SIMULATE → SDK-GEN → [RUNONBOARD] → PACKAGE
 ```
 
-如需让 Codex 在其他仓库也自动发现该 skill，可将 `.codex/skills/magnetar-deploy` 复制或链接到 `${CODEX_HOME:-~/.codex}/skills/`。
-
-## Claude
-
-In Claude console:
+## 快速开始
 
 ```text
-/magnetar repo=[本地路径或git repo] task_dir=[工作目录, 默认为claude的临时目录]
+/axmodel-pipeline hf://ultralytics/assets AX650
+/axmodel-pipeline https://github.com/xxx/resnet AX620E
+/axmodel-pipeline /data/models/yolo.pt AX650
 ```
+
+## 输入参数
+
+| 参数 | 必填 | 说明 |
+|------|------|------|
+| `SOURCE` | 是 | `hf://org/model[@rev]`、git URL、本地路径 |
+| `TARGET_HARDWARE` | 是 | `AX650` \| `AX620E` |
+| `MODEL_NAME` | 否 | 默认从 SOURCE 推断 |
+| `SDK_LANG` | 否 | `python` \| `cpp` \| `both`（默认 both） |
+| `TOOLCHAIN_FILE` | 否 | aarch64 交叉编译 toolchain.cmake 路径 |
+| `HF_TOKEN` | 条件 | 私有 HuggingFace 模型必须提供 |
+| `BOARD` | 条件 | RUNONBOARD 阶段需要，格式 `user@host` |
+
+## 产物
+
+```
+TASK_DIR/
+  export/
+    model.onnx
+    model_meta.json        # I/O tensor 元数据
+    tokenizer/             # transformers 模型含此目录
+  compile/
+    model.axmodel
+  simulate/
+    accuracy_report.md
+  sdk/
+    python/{model_name}_sdk/   # Python 推理 SDK
+    cpp/                        # C++ SDK + toolchain-aarch64.cmake
+  package/                      # 最终打包产物
+```
+
+## Skills
+
+- `.codex/skills/axmodel-pipeline/` — 入口 skill（新设计）
+- `.codex/skills/magnetar-deploy/` — 阶段执行 helper（EXPORT/COMPILE/SIMULATE/RUNONBOARD）
+
+## 工作流规范
+
+`.codex/workflows/axmodel-pipeline.yaml`
