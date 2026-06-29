@@ -35,21 +35,30 @@ description: Convert remote or local AI models into AXera AXMODEL packages with 
 
 ```text
 package/
+  README.md
+  .gitignore
   models/
     model.axmodel
     model_meta.json
-  sdk/
-    python/
-    cpp/
+  python/
+  cpp/
+  model_convert/
+    README.md
+    export_onnx.py
+    model.onnx
+    model_meta.json
+    pulsar2_config.json
+    compile_pulsar2.sh
   reports/
     export_report.md
     compile_report.md
     simulate_report.md
     runonboard_report.md   # 如果执行了 RUNONBOARD
-  README.md
   task.md
   analysis.md
 ```
+
+`package/` 必须是一个可独立作为 git 仓库发布的客户项目目录。SDK 依赖保持最小化；模型转换过程必须在 `model_convert/` 中可追溯。
 
 ## 强制记录
 
@@ -94,4 +103,5 @@ package/
 - Python SDK import 成功；上板验证时必须使用 `pyaxengine`/`AxEngineExecutionProvider` 真实运行。
 - C++ SDK 至少 `cmake configure` 成功；存在工具链时完成交叉编译，上板验证时必须链接 AX Engine runtime 真实运行。
 - `ax_run_model` 只允许作为 AXMODEL smoke check，不能作为 Python/C++ SDK 的实现或验证替代。
+- `package/model_convert/` 包含 ONNX 导出脚本、实际 Pulsar2 配置和转换说明。
 - `package/README.md` 能指导客户运行 Python/C++ 示例。

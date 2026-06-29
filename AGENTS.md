@@ -39,7 +39,7 @@ TASK_DIR/
   sdk/python/   # Python SDK
   sdk/cpp/      # C++ SDK + toolchain-aarch64.cmake
   runonboard/   # 板端验证文件
-  package/      # 客户交付包
+  package/      # 客户交付 git 项目根目录
   cache/        # 跨阶段中间文件和临时调试文件
   task.md
   analysis.md
@@ -55,3 +55,4 @@ TASK_DIR/
 - Python SDK 必须通过 import 检查，并使用 `pyaxengine` 的 `AxEngineExecutionProvider` 作为默认 provider。
 - C++ SDK 必须至少通过 CMake configure；存在 aarch64 工具链时执行交叉编译验证，并直接链接 AX Engine runtime。
 - `ax_run_model` 只用于 AXMODEL smoke check，不得作为 Python/C++ SDK 的实现或验证替代。
+- PACKAGE 阶段必须生成可独立作为 git 项目发布的目录，顶层包含 `python/`、`cpp/`、`models/`、`model_convert/` 和 `README.md`。

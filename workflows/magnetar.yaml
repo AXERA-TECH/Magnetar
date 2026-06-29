@@ -47,8 +47,9 @@ workflow:
       required_artifacts:
         - package/models/model.axmodel
         - package/models/model_meta.json
-        - package/sdk/python/
-        - package/sdk/cpp/
+        - package/python/
+        - package/cpp/
+        - package/model_convert/
         - package/reports/
         - package/README.md
     assumptions:
@@ -172,14 +173,19 @@ workflow:
       validation: [exists, non_empty]
     - id: python_sdk
       type: directory
-      destination: TASK_DIR/package/sdk/python/
+      destination: TASK_DIR/package/python/
       required: true
       validation: [import_check]
     - id: cpp_sdk
       type: directory
-      destination: TASK_DIR/package/sdk/cpp/
+      destination: TASK_DIR/package/cpp/
       required: true
       validation: [cmake_configure]
+    - id: model_convert
+      type: directory
+      destination: TASK_DIR/package/model_convert/
+      required: true
+      validation: [contains_export_script, contains_pulsar2_config]
     - id: reports
       type: directory
       destination: TASK_DIR/package/reports/
@@ -460,6 +466,7 @@ workflow:
       pass_when:
         - all required package artifacts exist
         - SDK validation passed
+        - model_convert contains ONNX export script and Pulsar2 config
         - RUNONBOARD passed when BOARD was provided
         - README includes customer usage
       fail_when:
@@ -500,8 +507,10 @@ workflow:
   completion:
     success_when:
       - package/models/model.axmodel exists
-      - package/sdk/python exists and import check passed
-      - package/sdk/cpp exists and cmake configure passed
+      - package/python exists and import check passed
+      - package/cpp exists and cmake configure passed
+      - package/model_convert/export_onnx.py exists
+      - package/model_convert/pulsar2_config.json exists
       - package/reports/simulate_report.md exists
       - package/README.md exists
     failure_when:

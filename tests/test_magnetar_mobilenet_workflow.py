@@ -451,8 +451,8 @@ class MobileNetRealWorkflowTest(unittest.TestCase):
                 `AxEngineExecutionProvider`；不可用时 SDK 会尝试 pyaxengine 返回的其他 provider。
 
                 ```bash
-                LD_LIBRARY_PATH=/soc/lib PYTHONPATH=$PWD/sdk/python \\
-                  python3 sdk/python/mobilenet_sdk/example.py \\
+                LD_LIBRARY_PATH=/soc/lib PYTHONPATH=$PWD/python \\
+                  python3 python/mobilenet_sdk/example.py \\
                   --model models/model.axmodel --input input.npy --output output.npy
                 ```
                 """
@@ -676,12 +676,88 @@ class MobileNetRealWorkflowTest(unittest.TestCase):
         run(["cmake", "-S", "sdk/cpp", "-B", "sdk/cpp/build"], cwd=task_dir, timeout=120)
 
         package = task_dir / "package"
-        for subdir in ["models", "sdk", "reports"]:
+        if package.exists():
+            shutil.rmtree(package)
+        for subdir in ["models", "python", "cpp", "model_convert", "reports"]:
             (package / subdir).mkdir(parents=True, exist_ok=True)
         shutil.copy2(task_dir / "compile" / "model.axmodel", package / "models" / "model.axmodel")
         shutil.copy2(task_dir / "export" / "model_meta.json", package / "models" / "model_meta.json")
-        shutil.copytree(task_dir / "sdk" / "python", package / "sdk" / "python", dirs_exist_ok=True)
-        shutil.copytree(task_dir / "sdk" / "cpp", package / "sdk" / "cpp", dirs_exist_ok=True)
+        shutil.copytree(task_dir / "sdk" / "python", package / "python", dirs_exist_ok=True)
+        shutil.copytree(
+            task_dir / "sdk" / "cpp",
+            package / "cpp",
+            dirs_exist_ok=True,
+            ignore=shutil.ignore_patterns("build", "build-*", "CMakeFiles"),
+        )
+        shutil.copy2(task_dir / "export" / "model.onnx", package / "model_convert" / "model.onnx")
+        shutil.copy2(task_dir / "export" / "model_meta.json", package / "model_convert" / "model_meta.json")
+        shutil.copy2(task_dir / "compile" / "pulsar2_config.json", package / "model_convert" / "pulsar2_config.json")
+        shutil.copy2(task_dir / "export" / "export_report.md", package / "model_convert" / "export_report.md")
+        (package / "model_convert" / "export_onnx.py").write_text(
+            textwrap.dedent(
+                """\
+                import argparse
+                import numpy as np
+                import torch
+                from torchvision.models import MobileNet_V2_Weights, mobilenet_v2
+
+
+                def main():
+                    parser = argparse.ArgumentParser()
+                    parser.add_argument("--output", default="model.onnx")
+                    args = parser.parse_args()
+
+                    model = mobilenet_v2(weights=MobileNet_V2_Weights.DEFAULT).eval()
+                    sample = torch.rand(1, 3, 224, 224, dtype=torch.float32)
+                    np.save("sample_input.npy", sample.numpy().astype(np.float32))
+                    torch.onnx.export(
+                        model,
+                        sample,
+                        args.output,
+                        input_names=["input"],
+                        output_names=["logits"],
+                        opset_version=17,
+                        dynamo=False,
+                    )
+
+
+                if __name__ == "__main__":
+                    main()
+                """
+            ),
+            encoding="utf-8",
+        )
+        (package / "model_convert" / "compile_pulsar2.sh").write_text(
+            textwrap.dedent(
+                """\
+                #!/usr/bin/env bash
+                set -euo pipefail
+
+                pulsar2 build --config pulsar2_config.json
+                """
+            ),
+            encoding="utf-8",
+        )
+        (package / "model_convert" / "README.md").write_text(
+            textwrap.dedent(
+                f"""\
+                # Model Convert
+
+                This directory records how `models/model.axmodel` was produced.
+
+                - `export_onnx.py`: exports MobileNetV2 from torchvision to static ONNX.
+                - `model.onnx`: ONNX artifact used by Pulsar2.
+                - `pulsar2_config.json`: Pulsar2 build configuration for `{TARGET_HARDWARE}`.
+                - `compile_pulsar2.sh`: minimal build command when Pulsar2 is available on PATH.
+                - `model_meta.json`: input/output metadata used by the SDKs.
+
+                The original compile in this test used Docker image `{pulsar_image}` and explicitly
+                kept `highest_mix_precision` disabled.
+                """
+            ),
+            encoding="utf-8",
+        )
+        os.chmod(package / "model_convert" / "compile_pulsar2.sh", 0o755)
         for report in [
             task_dir / "export" / "export_report.md",
             task_dir / "compile" / "compile_report.md",
@@ -690,18 +766,69 @@ class MobileNetRealWorkflowTest(unittest.TestCase):
             shutil.copy2(report, package / "reports" / report.name)
         shutil.copy2(task_dir / "task.md", package / "task.md")
         shutil.copy2(task_dir / "analysis.md", package / "analysis.md")
+        (package / ".gitignore").write_text(
+            textwrap.dedent(
+                """\
+                __pycache__/
+                *.pyc
+                build/
+                build-*/
+                CMakeFiles/
+                CMakeCache.txt
+                cmake_install.cmake
+                Makefile
+                *_output.npy
+                *_output.bin
+                """
+            ),
+            encoding="utf-8",
+        )
         (package / "README.md").write_text(
             textwrap.dedent(
                 f"""\
-                # MobileNetV2 AXMODEL Package
+                # MobileNetV2 AXMODEL Project
 
                 - target: {TARGET_HARDWARE}
                 - pulsar2_image: {pulsar_image}
                 - cosine_similarity: {metrics['cosine_similarity']}
 
-                Python SDK: see `sdk/python/README.md`.
-                C++ SDK: see `sdk/cpp/README.md`.
-                Model: `models/model.axmodel`.
+                This directory is a standalone customer project. It can be checked into git
+                directly after removing or replacing any generated model artifacts your release
+                policy does not want to version.
+
+                ## Layout
+
+                - `models/`: AXMODEL and model metadata.
+                - `python/`: Python SDK and example using `pyaxengine`.
+                - `cpp/`: C++ SDK/example using AX Engine runtime directly.
+                - `model_convert/`: ONNX export script, Pulsar2 config, and conversion notes.
+                - `reports/`: export, compile, simulate, and run-on-board reports.
+
+                ## Python
+
+                Dependencies are intentionally small: `numpy` and `pyaxengine`.
+
+                ```bash
+                LD_LIBRARY_PATH=/soc/lib PYTHONPATH=$PWD/python \\
+                  python3 python/mobilenet_sdk/example.py \\
+                  --model models/model.axmodel --input input.npy --output python_output.npy
+                ```
+
+                ## C++
+
+                Cross-compile on the host and run the binary on the AX board.
+
+                ```bash
+                cmake -S cpp -B cpp/build-aarch64 \\
+                  -DCMAKE_TOOLCHAIN_FILE=cpp/toolchain-aarch64.cmake \\
+                  -DAX_RUNTIME_ROOT=/path/to/ax/runtime
+                cmake --build cpp/build-aarch64
+                ```
+
+                ## Model Conversion
+
+                See `model_convert/README.md`, `model_convert/export_onnx.py`, and
+                `model_convert/pulsar2_config.json` for the conversion recipe.
                 """
             ),
             encoding="utf-8",
@@ -731,13 +858,13 @@ class MobileNetRealWorkflowTest(unittest.TestCase):
         if not self._board_has_pyaxengine(board):
             if not (PYAXENGINE_REPO / "axengine").is_dir():
                 raise unittest.SkipTest("pyaxengine is not available on board or in /tmp/pyaxengine")
-            self._scp_to(board, PYAXENGINE_REPO / "axengine", f"{remote_dir}/package/sdk/python/axengine")
+            self._scp_to(board, PYAXENGINE_REPO / "axengine", f"{remote_dir}/package/python/axengine")
 
         py_log = self._ssh(
             board,
             "cd {remote} && "
-            "LD_LIBRARY_PATH=/soc/lib PYTHONPATH=$PWD/package/sdk/python "
-            "python3 package/sdk/python/mobilenet_sdk/example.py "
+            "LD_LIBRARY_PATH=/soc/lib PYTHONPATH=$PWD/package/python "
+            "python3 package/python/mobilenet_sdk/example.py "
             "--model package/models/model.axmodel --input input.npy --output python_output.npy".format(
                 remote=remote_dir
             ),
@@ -970,11 +1097,18 @@ class MobileNetRealWorkflowTest(unittest.TestCase):
         required = [
             "package/models/model.axmodel",
             "package/models/model_meta.json",
-            "package/sdk/python",
-            "package/sdk/cpp",
+            "package/python/mobilenet_sdk/inference.py",
+            "package/python/requirements.txt",
+            "package/cpp/CMakeLists.txt",
+            "package/cpp/examples/main.cpp",
+            "package/model_convert/README.md",
+            "package/model_convert/export_onnx.py",
+            "package/model_convert/pulsar2_config.json",
+            "package/model_convert/compile_pulsar2.sh",
             "package/reports",
             "package/reports/runonboard_report.md",
             "package/README.md",
+            "package/.gitignore",
         ]
         for rel in required:
             path = task_dir / rel
@@ -986,6 +1120,13 @@ class MobileNetRealWorkflowTest(unittest.TestCase):
         self.assertEqual(meta["model_name"], "mobilenet_v2")
         self.assertEqual(meta["inputs"][0]["shape"], [1, 3, 224, 224])
         self.assertEqual(meta["outputs"][0]["shape"], [1, 1000])
+        readme = (task_dir / "package/README.md").read_text(encoding="utf-8")
+        self.assertIn("standalone customer project", readme)
+        self.assertIn("model_convert/pulsar2_config.json", readme)
+        config = json.loads(
+            (task_dir / "package/model_convert/pulsar2_config.json").read_text(encoding="utf-8")
+        )
+        self.assertFalse(config["quant"]["highest_mix_precision"])
 
     @staticmethod
     def _cosine(left, right):
