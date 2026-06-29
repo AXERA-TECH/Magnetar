@@ -2,3 +2,19 @@ todo/
 cache/
 **/cache/
 todos/
+
+# Python / local runtime artifacts
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.venv/
+**/.venv/
+*.db
+*.sqlite
+*.sqlite3
+
+# Frontend dependencies and build output
+node_modules/
+**/node_modules/
+build/
+**/build/

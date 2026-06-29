@@ -1,0 +1,97 @@
+---
+name: magnetar
+description: Convert remote or local AI models into AXera AXMODEL packages with Python and C++ SDKs for customer delivery. Use when Codex must acquire a model from Git/HuggingFace/URL/local path, export ONNX, compile with Pulsar2, simulate/validate AXMODEL accuracy, optionally run on AX hardware, generate SDKs, or package deployment artifacts.
+---
+
+# Magnetar
+
+始终用中文沟通。该 skill 是 Magnetar 的公开入口，用于把远程或本地模型转换为客户可用的 AXMODEL 交付包。
+
+严格按以下顺序推进：
+
+`ACQUIRE -> INIT -> EXPORT -> TOOLCHAIN -> COMPILE -> SIMULATE -> SDK-GEN -> RUNONBOARD -> PACKAGE`
+
+`RUNONBOARD` 只有用户提供 `BOARD` 时执行；未提供时记录为未验证并继续 `PACKAGE`。遇到 `STOP` 必须暂停等待用户确认。
+
+机器可读规范见 [../../workflows/magnetar.yaml](../../workflows/magnetar.yaml)。
+
+## 输入
+
+- `SOURCE`: 必填。Git 仓库、HuggingFace repo、本地目录、单模型文件或可下载 URL。
+- `TARGET_HARDWARE`: 必填。默认支持 `AX650`、`AX620E`，其他 AX 芯片需确认 Pulsar2 支持。
+- `MODEL_NAME`: 可选。默认从 `SOURCE` 推断。
+- `TASK_DIR`: 可选。默认 `todos/work/<timestamp>-<model-name>/`。
+- `SDK_LANG`: 可选。`python`、`cpp`、`both`，默认 `both`。
+- `HF_TOKEN`: 条件必填。私有 HuggingFace 模型从环境变量读取。
+- `BOARD`: 可选。板端 SSH 信息，格式优先为 `user@host[:port]`。
+- `BOARD_PASSWORD`: 可选。用户已确认的默认板端密码为 `123456`。
+- `PULSAR2_IMAGE` 或 `PULSAR2_BIN`: 可选。Pulsar2 Docker 镜像或本地可执行文件；本地没有 Pulsar2 时，默认从 `https://huggingface.co/AXERA-TECH/Pulsar2/tree/main` 获取 Docker 镜像。
+- `CXX_TOOLCHAIN_URL`: 可选。默认使用 Arm GNU aarch64 工具链：
+  `https://developer.arm.com/-/media/Files/downloads/gnu-a/9.2-2019.12/binrel/gcc-arm-9.2-2019.12-x86_64-aarch64-none-linux-gnu.tar.xz`
+
+## 输出
+
+最终交付目录为 `TASK_DIR/package/`：
+
+```text
+package/
+  models/
+    model.axmodel
+    model_meta.json
+  sdk/
+    python/
+    cpp/
+  reports/
+    export_report.md
+    compile_report.md
+    simulate_report.md
+    runonboard_report.md   # 如果执行了 RUNONBOARD
+  README.md
+  task.md
+  analysis.md
+```
+
+## 强制记录
+
+每个阶段都要更新：
+
+- `TASK_DIR/task.md`: 阶段状态、命令摘要、产物路径、验证结果。
+- `TASK_DIR/analysis.md`: 技术判断、失败原因、修复方案、配置取舍。
+
+所有中间文件必须位于 `TASK_DIR`，不得修改原始模型来源。已解决的通用问题记录到仓库根目录 `issues/`。
+
+## 阶段调度
+
+- `ACQUIRE`: 读取 [hidden/acquire/SKILL.md](hidden/acquire/SKILL.md)。
+- `INIT`: 读取 [hidden/init/SKILL.md](hidden/init/SKILL.md)。
+- `EXPORT`: 读取 [hidden/export/SKILL.md](hidden/export/SKILL.md)。
+- `TOOLCHAIN`: 读取 [hidden/toolchain/SKILL.md](hidden/toolchain/SKILL.md)。
+- `COMPILE`: 读取 [hidden/compile/SKILL.md](hidden/compile/SKILL.md)。
+- `SIMULATE`: 读取 [hidden/simulate/SKILL.md](hidden/simulate/SKILL.md)。
+- `SDK-GEN`: 读取 [hidden/sdk-gen/SKILL.md](hidden/sdk-gen/SKILL.md)。
+- `RUNONBOARD`: 读取 [hidden/runonboard/SKILL.md](hidden/runonboard/SKILL.md)。
+- `PACKAGE`: 读取 [hidden/package/SKILL.md](hidden/package/SKILL.md)。
+
+## STOP 点
+
+必须 STOP 的情况：
+
+- `SOURCE` 或 `TARGET_HARDWARE` 缺失。
+- 主模型文件或导出入口无法自动判断。
+- 只能使用随机校准数据，且用户未确认。
+- ONNX 与原模型对分失败。
+- Pulsar2 缺失，且无法从本地路径、用户提供镜像或 HuggingFace `AXERA-TECH/Pulsar2` 镜像运行。
+- 编译失败需要修改模型图或改导出策略。
+- SIMULATE 精度不达标。
+- 需要私有模型凭据、板端凭据或其他敏感输入。
+
+## 接受标准
+
+- `export/model.onnx` 为静态 shape，并可被 `onnxruntime` 加载。
+- `export/model_meta.json` 含完整输入输出名称、shape、dtype、layout。
+- `compile/model.axmodel` 存在。
+- `simulate/simulate_report.md` 给出 ONNX vs AXMODEL 指标，默认 `cosine >= 0.99` 或任务语义等价。
+- Python SDK import 成功；上板验证时必须使用 `pyaxengine`/`AxEngineExecutionProvider` 真实运行。
+- C++ SDK 至少 `cmake configure` 成功；存在工具链时完成交叉编译，上板验证时必须链接 AX Engine runtime 真实运行。
+- `ax_run_model` 只允许作为 AXMODEL smoke check，不能作为 Python/C++ SDK 的实现或验证替代。
+- `package/README.md` 能指导客户运行 Python/C++ 示例。

@@ -1,0 +1,516 @@
+workflow:
+  schema_version: "1.0"
+  name: magnetar
+  entry_skill: .codex/skills/magnetar/SKILL.md
+  mode: guided
+  task_type: hybrid
+  visibility: collapsed_by_default
+
+  requirement:
+    goal: Convert a remote or local model into an AXera AXMODEL package with customer-facing Python and C++ SDKs.
+    output:
+      format: directory
+      destination: TASK_DIR/package/
+      consumer: both
+    constraints:
+      time_budget: per-model, no global fixed limit
+      cost_budget: no paid external actions without user approval
+      technology:
+        - Pulsar2 for ONNX to AXMODEL compilation
+        - Pulsar2 Docker image fallback from https://huggingface.co/AXERA-TECH/Pulsar2/tree/main
+        - ONNX static shape
+        - onnxruntime for ONNX validation
+        - Python SDK with pyaxengine and AxEngineExecutionProvider by default
+        - C++ SDK with CMake and direct AX Engine runtime linking
+        - Arm GNU aarch64 toolchain from https://developer.arm.com/-/media/Files/downloads/gnu-a/9.2-2019.12/binrel/gcc-arm-9.2-2019.12-x86_64-aarch64-none-linux-gnu.tar.xz
+      security:
+        - do not modify source model repositories
+        - do not guess private credentials
+        - do not include secrets in package artifacts
+      human_approval_required: true
+    acceptance:
+      checks:
+        - export/model.onnx exists, has static shapes, and loads in onnxruntime
+        - export/model_meta.json contains input and output names, shapes, dtypes, and preprocessing notes
+        - compile/model.axmodel exists and is non-empty
+        - simulate/simulate_report.md records ONNX vs AXMODEL metrics
+        - default cosine similarity is at least 0.99 unless task-specific metrics justify acceptance
+        - Python SDK imports successfully and includes a pyaxengine runnable example
+        - C++ SDK configures with CMake and cross-compiles against AX Engine runtime when the aarch64 toolchain is available
+        - when BOARD is provided, Python and C++ SDK examples run on a board whose chip_type matches TARGET_HARDWARE
+        - package/README.md explains customer usage
+      metrics:
+        - cosine_similarity
+        - mae
+        - max_abs_diff
+        - task_specific_accuracy_when_available
+      required_artifacts:
+        - package/models/model.axmodel
+        - package/models/model_meta.json
+        - package/sdk/python/
+        - package/sdk/cpp/
+        - package/reports/
+        - package/README.md
+    assumptions:
+      - The Arm URL supplied by the user is the C++ cross-compilation toolchain source, not a Pulsar2 distribution.
+      - Pulsar2 is provided by the user environment, a local binary, a user-specified Docker image/package, or the HuggingFace AXERA-TECH/Pulsar2 Docker image fallback.
+      - RUNONBOARD is optional unless BOARD is provided.
+      - ax_run_model is only a model smoke check and never substitutes for Python/C++ SDK execution.
+    open_questions: []
+
+  capabilities:
+    - id: grill_me_alignment
+      purpose: Requirement alignment before workflow design
+      source: existing
+      skill_path: /home/yrz/.codex/skills/grill-me/SKILL.md
+      permissions: []
+      required: true
+    - id: acquire
+      purpose: Acquire remote or local model into TASK_DIR/origin
+      source: generate
+      skill_path: .codex/skills/magnetar/hidden/acquire/SKILL.md
+      permissions: [network, filesystem]
+      required: true
+    - id: export
+      purpose: Export static ONNX, validate source-vs-ONNX, and generate metadata/calibration data
+      source: generate
+      skill_path: .codex/skills/magnetar/hidden/export/SKILL.md
+      permissions: [filesystem, network]
+      required: true
+    - id: pulsar2
+      purpose: Compile ONNX to AXMODEL
+      source: install
+      skill_path: .codex/skills/magnetar/hidden/toolchain/SKILL.md
+      permissions: [filesystem, docker, network]
+      required: true
+    - id: cxx_toolchain
+      purpose: Build and validate C++ SDK for aarch64
+      source: install
+      skill_path: .codex/skills/magnetar/hidden/toolchain/SKILL.md
+      permissions: [network, filesystem]
+      required: false
+    - id: sdk_gen
+      purpose: Generate Python and C++ customer SDKs
+      source: generate
+      skill_path: .codex/skills/magnetar/hidden/sdk-gen/SKILL.md
+      permissions: [filesystem]
+      required: true
+    - id: board_runtime
+      purpose: Optional board-side Python/C++ SDK validation on hardware matching TARGET_HARDWARE
+      source: external
+      skill_path: .codex/skills/magnetar/hidden/runonboard/SKILL.md
+      permissions: [network, ssh]
+      required: false
+
+  inputs:
+    - id: SOURCE
+      type: text
+      required: true
+      source: user
+      validation:
+        - git URL, HuggingFace repo, HTTP URL, local file, or local directory
+    - id: TARGET_HARDWARE
+      type: text
+      required: true
+      source: user
+      validation:
+        - AX650, AX620E, or another Pulsar2-supported AX target confirmed by user
+    - id: MODEL_NAME
+      type: text
+      required: false
+      source: user
+      validation:
+        - inferred from SOURCE when absent
+    - id: TASK_DIR
+      type: directory
+      required: false
+      source: user
+      validation:
+        - defaults to todos/work/<timestamp>-<model-name>/
+    - id: HF_TOKEN
+      type: credential
+      required: false
+      source: environment
+      validation:
+        - required only for private HuggingFace models
+    - id: PULSAR2_IMAGE
+      type: text
+      required: false
+      source: user
+      validation:
+        - Docker image name or local package reference
+    - id: PULSAR2_BIN
+      type: file
+      required: false
+      source: user
+      validation:
+        - executable Pulsar2 binary path
+    - id: PULSAR2_HF_REPO
+      type: url
+      required: false
+      source: external
+      validation:
+        - defaults to https://huggingface.co/AXERA-TECH/Pulsar2/tree/main when local Pulsar2 is unavailable
+    - id: BOARD
+      type: text
+      required: false
+      source: user
+      validation:
+        - user@host[:port]
+    - id: BOARD_PASSWORD
+      type: credential
+      required: false
+      source: user
+      validation:
+        - default AX board password 123456 may be used only because the user provided it
+
+  outputs:
+    - id: axmodel
+      type: file
+      destination: TASK_DIR/package/models/model.axmodel
+      required: true
+      validation: [exists, non_empty]
+    - id: python_sdk
+      type: directory
+      destination: TASK_DIR/package/sdk/python/
+      required: true
+      validation: [import_check]
+    - id: cpp_sdk
+      type: directory
+      destination: TASK_DIR/package/sdk/cpp/
+      required: true
+      validation: [cmake_configure]
+    - id: reports
+      type: directory
+      destination: TASK_DIR/package/reports/
+      required: true
+      validation: [export_report, compile_report, simulate_report]
+    - id: customer_readme
+      type: file
+      destination: TASK_DIR/package/README.md
+      required: true
+      validation: [contains_usage]
+
+  state_machine:
+    initial: draft
+    states:
+      - draft
+      - awaiting_user
+      - ready
+      - running
+      - validating
+      - retrying
+      - rolling_back
+      - degraded
+      - blocked
+      - failed
+      - succeeded
+    terminal:
+      - blocked
+      - failed
+      - succeeded
+    transitions:
+      - from: draft
+        to: awaiting_user
+        when: required information or capability source is missing
+      - from: draft
+        to: ready
+        when: requirements and required capabilities are sufficient
+      - from: ready
+        to: running
+        when: execution starts
+      - from: running
+        to: validating
+        when: all required execution steps finish
+      - from: validating
+        to: succeeded
+        when: all acceptance checks pass
+      - from: validating
+        to: retrying
+        when: a recoverable check fails and retry budget remains
+      - from: retrying
+        to: running
+        when: repair step is scheduled
+      - from: running
+        to: rolling_back
+        when: a failure requires rollback
+      - from: rolling_back
+        to: failed
+        when: rollback completes and no retry path remains
+      - from: running
+        to: degraded
+        when: optional capability fails and degraded output is acceptable
+      - from: running
+        to: blocked
+        when: required external input, permission, or credential is unavailable
+
+  steps:
+    - id: requirements_gate
+      kind: gate
+      skill: ""
+      description: Verify SOURCE, TARGET_HARDWARE, and required capability sources
+      depends_on: []
+      parallel_group: null
+      inputs: [SOURCE, TARGET_HARDWARE, PULSAR2_IMAGE, PULSAR2_BIN]
+      outputs: [requirements_ready]
+      timeout_seconds: null
+      retry: {max_attempts: 0, retry_on: [], backoff: none}
+      on_failure: {action: ask_user, target_step: null}
+      visibility: user_visible
+    - id: acquire
+      kind: agent
+      skill: .codex/skills/magnetar/hidden/acquire/SKILL.md
+      description: Acquire SOURCE into TASK_DIR/origin and produce manifest
+      depends_on: [requirements_gate]
+      parallel_group: null
+      inputs: [SOURCE, HF_TOKEN, TASK_DIR]
+      outputs: [origin_path, acquire_manifest]
+      timeout_seconds: 900
+      retry: {max_attempts: 2, retry_on: [network_timeout, partial_download], backoff: exponential}
+      on_failure: {action: ask_user, target_step: null}
+      visibility: user_visible
+    - id: init
+      kind: agent
+      skill: .codex/skills/magnetar/hidden/init/SKILL.md
+      description: Initialize TASK_DIR structure and audit logs
+      depends_on: [acquire]
+      parallel_group: null
+      inputs: [TASK_DIR, MODEL_NAME, TARGET_HARDWARE, acquire_manifest]
+      outputs: [task_md, analysis_md]
+      timeout_seconds: 120
+      retry: {max_attempts: 1, retry_on: [filesystem_transient], backoff: fixed}
+      on_failure: {action: fail, target_step: null}
+      visibility: summarized
+    - id: export
+      kind: agent
+      skill: .codex/skills/magnetar/hidden/export/SKILL.md
+      description: Export static ONNX, validate against source model, generate metadata and calibration data
+      depends_on: [init]
+      parallel_group: null
+      inputs: [origin_path, acquire_manifest, TASK_DIR]
+      outputs: [onnx_path, model_meta_json, calibration_dir, export_report]
+      timeout_seconds: 3600
+      retry: {max_attempts: 2, retry_on: [import_error, export_failed, validation_mismatch], backoff: none}
+      on_failure: {action: ask_user, target_step: null}
+      visibility: user_visible
+    - id: toolchain
+      kind: agent
+      skill: .codex/skills/magnetar/hidden/toolchain/SKILL.md
+      description: Verify Pulsar2 and prepare optional C++ aarch64 toolchain
+      depends_on: [export]
+      parallel_group: null
+      inputs: [PULSAR2_IMAGE, PULSAR2_BIN, PULSAR2_HF_REPO, TASK_DIR]
+      outputs: [pulsar2_command, cxx_toolchain_file]
+      timeout_seconds: 1200
+      retry: {max_attempts: 2, retry_on: [download_failed, docker_pull_failed], backoff: fixed}
+      on_failure: {action: ask_user, target_step: null}
+      visibility: user_visible
+    - id: compile
+      kind: agent
+      skill: .codex/skills/magnetar/hidden/compile/SKILL.md
+      description: Compile ONNX to AXMODEL using Pulsar2
+      depends_on: [toolchain]
+      parallel_group: null
+      inputs: [onnx_path, model_meta_json, calibration_dir, TARGET_HARDWARE, pulsar2_command]
+      outputs: [axmodel_path, compile_report]
+      timeout_seconds: 3600
+      retry: {max_attempts: 1, retry_on: [pulsar2_transient], backoff: none}
+      on_failure: {action: ask_user, target_step: export}
+      visibility: user_visible
+    - id: simulate
+      kind: agent
+      skill: .codex/skills/magnetar/hidden/simulate/SKILL.md
+      description: Compare ONNX and AXMODEL simulation outputs
+      depends_on: [compile]
+      parallel_group: null
+      inputs: [onnx_path, axmodel_path, model_meta_json, TASK_DIR]
+      outputs: [simulate_report, accuracy_metrics]
+      timeout_seconds: 1200
+      retry: {max_attempts: 1, retry_on: [simulation_transient], backoff: none}
+      on_failure: {action: ask_user, target_step: compile}
+      visibility: user_visible
+    - id: accuracy_gate
+      kind: gate
+      skill: ""
+      description: Decide whether simulation accuracy is acceptable
+      depends_on: [simulate]
+      parallel_group: null
+      inputs: [accuracy_metrics]
+      outputs: [accuracy_accepted]
+      timeout_seconds: null
+      retry: {max_attempts: 0, retry_on: [], backoff: none}
+      on_failure: {action: ask_user, target_step: compile}
+      visibility: user_visible
+    - id: sdk_python
+      kind: agent
+      skill: .codex/skills/magnetar/hidden/sdk-gen/SKILL.md
+      description: Generate Python SDK
+      depends_on: [accuracy_gate]
+      parallel_group: sdk
+      inputs: [axmodel_path, model_meta_json, MODEL_NAME]
+      outputs: [python_sdk_path]
+      timeout_seconds: 900
+      retry: {max_attempts: 1, retry_on: [generation_error], backoff: none}
+      on_failure: {action: fail, target_step: null}
+      visibility: summarized
+    - id: sdk_cpp
+      kind: agent
+      skill: .codex/skills/magnetar/hidden/sdk-gen/SKILL.md
+      description: Generate C++ SDK
+      depends_on: [accuracy_gate]
+      parallel_group: sdk
+      inputs: [axmodel_path, model_meta_json, MODEL_NAME, cxx_toolchain_file]
+      outputs: [cpp_sdk_path]
+      timeout_seconds: 900
+      retry: {max_attempts: 1, retry_on: [generation_error], backoff: none}
+      on_failure: {action: fail, target_step: null}
+      visibility: summarized
+    - id: sdk_validation
+      kind: synthesis
+      skill: .codex/skills/magnetar/hidden/sdk-gen/SKILL.md
+      description: Join Python and C++ SDK generation and validate both
+      depends_on: [sdk_python, sdk_cpp]
+      parallel_group: null
+      inputs: [python_sdk_path, cpp_sdk_path]
+      outputs: [sdk_report]
+      timeout_seconds: 600
+      retry: {max_attempts: 1, retry_on: [validation_failed], backoff: none}
+      on_failure: {action: fail, target_step: null}
+      visibility: user_visible
+    - id: runonboard
+      kind: agent
+      skill: .codex/skills/magnetar/hidden/runonboard/SKILL.md
+      description: Optionally validate Python and C++ SDKs on an AX board matching TARGET_HARDWARE when BOARD is provided
+      depends_on: [sdk_validation]
+      parallel_group: null
+      inputs: [BOARD, BOARD_PASSWORD, TARGET_HARDWARE, axmodel_path, model_meta_json, TASK_DIR]
+      outputs: [runonboard_report]
+      timeout_seconds: 1800
+      retry: {max_attempts: 1, retry_on: [ssh_transient], backoff: fixed}
+      on_failure: {action: degrade, target_step: null}
+      visibility: user_visible
+    - id: package
+      kind: agent
+      skill: .codex/skills/magnetar/hidden/package/SKILL.md
+      description: Assemble final customer package
+      depends_on: [runonboard]
+      parallel_group: null
+      inputs: [axmodel_path, model_meta_json, python_sdk_path, cpp_sdk_path, export_report, compile_report, simulate_report, runonboard_report]
+      outputs: [package_dir, customer_readme]
+      timeout_seconds: 300
+      retry: {max_attempts: 1, retry_on: [filesystem_transient], backoff: fixed}
+      on_failure: {action: fail, target_step: null}
+      visibility: user_visible
+    - id: final_validation
+      kind: gate
+      skill: ""
+      description: Validate package against acceptance checks
+      depends_on: [package]
+      parallel_group: null
+      inputs: [package_dir]
+      outputs: [acceptance_result]
+      timeout_seconds: 600
+      retry: {max_attempts: 0, retry_on: [], backoff: none}
+      on_failure: {action: fail, target_step: null}
+      visibility: user_visible
+
+  gates:
+    - id: required_inputs
+      kind: requirement
+      depends_on: []
+      pass_when:
+        - SOURCE is provided
+        - TARGET_HARDWARE is provided
+      fail_when:
+        - required input is missing
+      on_pass: proceed to acquire
+      on_fail: ask user for missing input
+    - id: pulsar2_available
+      kind: capability
+      depends_on: [toolchain]
+      pass_when:
+        - PULSAR2_BIN works or PULSAR2_IMAGE works or pulsar2 is on PATH or HuggingFace AXERA-TECH/Pulsar2 image is available
+      fail_when:
+        - no local, user-provided, or HuggingFace Pulsar2 runtime is available
+      on_pass: proceed to compile
+      on_fail: block and request Pulsar2 source
+    - id: export_valid
+      kind: validation
+      depends_on: [export]
+      pass_when:
+        - ONNX static shape validation passes
+        - ONNXRuntime load passes
+        - source-vs-ONNX comparison is acceptable
+      fail_when:
+        - model export or validation fails
+      on_pass: proceed to toolchain
+      on_fail: ask user or retry export strategy
+    - id: accuracy_gate
+      kind: validation
+      depends_on: [simulate]
+      pass_when:
+        - cosine >= 0.99 or task-specific metrics are accepted
+      fail_when:
+        - accuracy below threshold
+      on_pass: proceed to SDK generation
+      on_fail: STOP and ask whether to adjust compile/export settings
+    - id: package_validation
+      kind: validation
+      depends_on: [package]
+      pass_when:
+        - all required package artifacts exist
+        - SDK validation passed
+        - RUNONBOARD passed when BOARD was provided
+        - README includes customer usage
+      fail_when:
+        - required artifact is missing
+      on_pass: succeeded
+      on_fail: failed
+
+  failure_policy:
+    default_action: fail
+    max_total_attempts: 3
+    rollback_required_for:
+      - package directory rewrite after failed package validation
+    ask_user_for:
+      - missing SOURCE or TARGET_HARDWARE
+      - private model credentials
+      - ambiguous model file or export entry
+      - unavailable Pulsar2
+      - random-only calibration data
+      - accuracy below threshold
+      - board credentials
+    degraded_output_allowed: true
+    degraded_conditions:
+      - C++ cross compiler unavailable but CMake configure succeeds
+      - BOARD not provided, so RUNONBOARD is skipped
+
+  observability:
+    progress_updates: milestone
+    audit_log:
+      enabled: true
+      include_hidden_steps: true
+    artifacts:
+      record_intermediate_outputs: true
+      retention: workflow-local
+    required_logs:
+      - TASK_DIR/task.md
+      - TASK_DIR/analysis.md
+
+  completion:
+    success_when:
+      - package/models/model.axmodel exists
+      - package/sdk/python exists and import check passed
+      - package/sdk/cpp exists and cmake configure passed
+      - package/reports/simulate_report.md exists
+      - package/README.md exists
+    failure_when:
+      - required Pulsar2 capability is unavailable
+      - ONNX export cannot be validated
+      - AXMODEL compile fails with no accepted repair path
+      - SDK generation fails
+      - acceptance checks fail after retry budget is exhausted
+    final_response:
+      include_artifacts: true
+      include_assumptions: true
+      include_limitations: true
