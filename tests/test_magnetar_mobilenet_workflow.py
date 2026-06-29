@@ -365,25 +365,28 @@ class MobileNetRealWorkflowTest(unittest.TestCase):
         return metrics
 
     def _generate_sdks_and_package(self, task_dir, metrics, pulsar_image):
+        imagenet_labels = MobileNet_V2_Weights.DEFAULT.meta["categories"]
         py_sdk = task_dir / "sdk" / "python" / "mobilenet_sdk"
         py_sdk.mkdir(parents=True, exist_ok=True)
         (py_sdk / "__init__.py").write_text(
-            "from .inference import MobileNetInference\n", encoding="utf-8"
+            "from .inference import MobileNetClassifier\n", encoding="utf-8"
         )
         (py_sdk / "inference.py").write_text(
             textwrap.dedent(
                 """\
                 import numpy as np
+                from .postprocess import topk
 
 
                 DEFAULT_PROVIDER = "AxEngineExecutionProvider"
 
 
-                class MobileNetInference:
-                    def __init__(self, model_path, providers=None):
+                class MobileNetClassifier:
+                    def __init__(self, model_path, providers=None, labels=None):
                         import axengine as axe
 
                         self.model_path = model_path
+                        self.labels = labels
                         preferred = providers or [DEFAULT_PROVIDER]
                         try:
                             self.session = axe.InferenceSession(model_path, providers=preferred)
@@ -399,6 +402,10 @@ class MobileNetRealWorkflowTest(unittest.TestCase):
                     def run(self, input_tensor):
                         array = np.ascontiguousarray(input_tensor.astype(np.float32))
                         return self.session.run(None, {self.inputs[0].name: array})[0]
+
+                    def classify(self, input_tensor, k=5):
+                        logits = self.run(input_tensor)
+                        return topk(logits, labels=self.labels, k=k)
                 """
             ),
             encoding="utf-8",
@@ -407,8 +414,10 @@ class MobileNetRealWorkflowTest(unittest.TestCase):
             textwrap.dedent(
                 """\
                 import argparse
+                from pathlib import Path
                 import numpy as np
-                from mobilenet_sdk import MobileNetInference
+                from mobilenet_sdk import MobileNetClassifier
+                from mobilenet_sdk.postprocess import load_labels
 
 
                 def main():
@@ -416,12 +425,17 @@ class MobileNetRealWorkflowTest(unittest.TestCase):
                     parser.add_argument("--model", required=True)
                     parser.add_argument("--input", required=True)
                     parser.add_argument("--output", required=True)
+                    parser.add_argument("--labels", default=str(Path(__file__).resolve().parents[1] / "imagenet_classes.txt"))
+                    parser.add_argument("--topk", type=int, default=5)
                     args = parser.parse_args()
 
-                    runner = MobileNetInference(args.model)
-                    output = runner.run(np.load(args.input))
-                    np.save(args.output, output.astype(np.float32))
-                    print({"shape": list(output.shape), "dtype": str(output.dtype)})
+                    labels = load_labels(args.labels)
+                    classifier = MobileNetClassifier(args.model, labels=labels)
+                    input_tensor = np.load(args.input)
+                    logits = classifier.run(input_tensor)
+                    np.save(args.output, logits.astype(np.float32))
+                    for item in classifier.classify(input_tensor, k=args.topk):
+                        print(f"{item['rank']}: {item['label']} ({item['score']:.6f})")
 
 
                 if __name__ == "__main__":
@@ -435,7 +449,37 @@ class MobileNetRealWorkflowTest(unittest.TestCase):
             encoding="utf-8",
         )
         (py_sdk / "postprocess.py").write_text(
-            "import numpy as np\n\n\ndef topk(logits, k=5):\n    order = np.argsort(logits.reshape(-1))[::-1][:k]\n    return [(int(i), float(logits.reshape(-1)[i])) for i in order]\n",
+            textwrap.dedent(
+                """\
+                import numpy as np
+
+
+                def load_labels(path):
+                    with open(path, "r", encoding="utf-8") as f:
+                        return [line.strip() for line in f if line.strip()]
+
+
+                def topk(logits, labels=None, k=5):
+                    flat = logits.reshape(-1)
+                    order = np.argsort(flat)[::-1][:k]
+                    result = []
+                    for rank, index in enumerate(order, start=1):
+                        label = labels[int(index)] if labels and int(index) < len(labels) else str(int(index))
+                        result.append(
+                            {
+                                "rank": rank,
+                                "index": int(index),
+                                "label": label,
+                                "score": float(flat[index]),
+                            }
+                        )
+                    return result
+                """
+            ),
+            encoding="utf-8",
+        )
+        (task_dir / "sdk" / "python" / "imagenet_classes.txt").write_text(
+            "\n".join(imagenet_labels) + "\n",
             encoding="utf-8",
         )
         (task_dir / "sdk" / "python" / "requirements.txt").write_text(
@@ -455,6 +499,9 @@ class MobileNetRealWorkflowTest(unittest.TestCase):
                   python3 python/mobilenet_sdk/example.py \\
                   --model models/model.axmodel --input input.npy --output output.npy
                 ```
+
+                该示例实例化 `MobileNetClassifier`，输出 ImageNet top-k 分类结果，
+                同时保存 logits 方便与仿真结果对比。
                 """
             ),
             encoding="utf-8",
@@ -472,31 +519,80 @@ class MobileNetRealWorkflowTest(unittest.TestCase):
                 set(CMAKE_CXX_STANDARD 17)
                 set(CMAKE_CXX_STANDARD_REQUIRED ON)
                 set(AX_RUNTIME_ROOT "" CACHE PATH "AX board runtime root containing include/ and lib/")
+                add_library(mobilenet_sdk src/mobilenet_runner.cpp)
+                target_include_directories(mobilenet_sdk PUBLIC include)
                 add_executable(mobilenet_example examples/main.cpp)
                 if(AX_RUNTIME_ROOT)
-                  target_include_directories(mobilenet_example PRIVATE ${AX_RUNTIME_ROOT}/include)
-                  target_link_directories(mobilenet_example PRIVATE ${AX_RUNTIME_ROOT}/lib)
-                  target_link_libraries(mobilenet_example PRIVATE ax_engine ax_sys)
+                  target_include_directories(mobilenet_sdk PRIVATE ${AX_RUNTIME_ROOT}/include)
+                  target_link_directories(mobilenet_sdk PRIVATE ${AX_RUNTIME_ROOT}/lib)
+                  target_link_libraries(mobilenet_sdk PRIVATE ax_engine ax_sys)
                 endif()
+                target_link_libraries(mobilenet_example PRIVATE mobilenet_sdk)
                 """
             ),
             encoding="utf-8",
         )
-        (cpp_sdk / "examples" / "main.cpp").write_text(
+        (cpp_sdk / "include" / "mobilenet_runner.hpp").write_text(
             textwrap.dedent(
-                r"""\
+                """\
+                #pragma once
+
+                #include <string>
+                #include <vector>
+
+
+                struct Classification {
+                    int rank;
+                    int index;
+                    float score;
+                    std::string label;
+                };
+
+
+                class MobileNetRunner {
+                public:
+                    explicit MobileNetRunner(const std::string& model_path);
+                    ~MobileNetRunner();
+
+                    MobileNetRunner(const MobileNetRunner&) = delete;
+                    MobileNetRunner& operator=(const MobileNetRunner&) = delete;
+
+                    std::vector<float> run(const std::vector<float>& input);
+                    std::vector<Classification> classify(
+                        const std::vector<float>& input,
+                        const std::vector<std::string>& labels,
+                        int k = 5);
+
+                private:
+                    struct Impl;
+                    Impl* impl_;
+                };
+
+                std::vector<float> read_float_file(const std::string& path);
+                void write_float_file(const std::string& path, const std::vector<float>& values);
+                std::vector<std::string> read_labels(const std::string& path);
+                """
+            ),
+            encoding="utf-8",
+        )
+        (cpp_sdk / "src" / "mobilenet_runner.cpp").write_text(
+            textwrap.dedent(
+                """\
+                #include "mobilenet_runner.hpp"
+
                 #include <ax_engine_api.h>
                 #include <ax_sys_api.h>
 
                 #include <algorithm>
-                #include <cstdint>
                 #include <cstring>
                 #include <fstream>
-                #include <iostream>
-                #include <string>
-                #include <vector>
+                #include <iterator>
+                #include <numeric>
+                #include <stdexcept>
 
-                static std::vector<char> read_file(const std::string& path) {
+
+                namespace {
+                std::vector<char> read_binary(const std::string& path) {
                     std::ifstream file(path, std::ios::binary);
                     if (!file) {
                         throw std::runtime_error("failed to open " + path);
@@ -506,82 +602,42 @@ class MobileNetRealWorkflowTest(unittest.TestCase):
                         std::istreambuf_iterator<char>());
                 }
 
-                static void write_file(const std::string& path, const void* data, size_t size) {
-                    std::ofstream file(path, std::ios::binary);
-                    if (!file) {
-                        throw std::runtime_error("failed to write " + path);
+                void check_ax(int ret, const char* message) {
+                    if (ret != 0) {
+                        throw std::runtime_error(message);
                     }
-                    file.write(static_cast<const char*>(data), static_cast<std::streamsize>(size));
                 }
+                }  // namespace
 
-                int main(int argc, char** argv) {
-                    if (argc != 4) {
-                        std::cerr << "usage: " << argv[0] << " model.axmodel input.bin output.bin\n";
-                        return 2;
-                    }
-
+                struct MobileNetRunner::Impl {
                     AX_ENGINE_HANDLE handle = nullptr;
                     AX_ENGINE_CONTEXT_T context = nullptr;
                     AX_ENGINE_IO_INFO_T* info = nullptr;
-                    AX_ENGINE_IO_T io;
-                    std::memset(&io, 0, sizeof(io));
+                    AX_ENGINE_IO_T io {};
                     std::vector<AX_ENGINE_IO_BUFFER_T> inputs;
                     std::vector<AX_ENGINE_IO_BUFFER_T> outputs;
+                    std::vector<char> model;
 
-                    auto cleanup = [&]() {
-                        for (auto& item : inputs) {
-                            if (item.phyAddr) AX_SYS_MemFree(item.phyAddr, item.pVirAddr);
-                        }
-                        for (auto& item : outputs) {
-                            if (item.phyAddr) AX_SYS_MemFree(item.phyAddr, item.pVirAddr);
-                        }
-                        if (handle) AX_ENGINE_DestroyHandle(handle);
-                        AX_ENGINE_Deinit();
-                        AX_SYS_Deinit();
-                    };
-
-                    try {
-                        int ret = AX_SYS_Init();
-                        if (ret != 0) {
-                            std::cerr << "AX_SYS_Init failed: 0x" << std::hex << ret << "\n";
-                            return 1;
-                        }
+                    explicit Impl(const std::string& model_path) : model(read_binary(model_path)) {
+                        check_ax(AX_SYS_Init(), "AX_SYS_Init failed");
 
                         AX_ENGINE_NPU_ATTR_T npu_attr;
                         std::memset(&npu_attr, 0, sizeof(npu_attr));
                         npu_attr.eHardMode = static_cast<AX_ENGINE_NPU_MODE_T>(0);
-                        ret = AX_ENGINE_Init(&npu_attr);
-                        if (ret != 0) {
-                            std::cerr << "AX_ENGINE_Init failed: 0x" << std::hex << ret << "\n";
-                            cleanup();
-                            return 1;
-                        }
+                        check_ax(AX_ENGINE_Init(&npu_attr), "AX_ENGINE_Init failed");
 
-                        auto model = read_file(argv[1]);
                         AX_ENGINE_HANDLE_EXTRA_T extra;
                         std::memset(&extra, 0, sizeof(extra));
                         char model_name[] = "mobilenet_v2";
                         extra.pName = reinterpret_cast<AX_S8*>(model_name);
-                        ret = AX_ENGINE_CreateHandleV2(
-                            &handle, model.data(), static_cast<AX_U32>(model.size()), &extra);
-                        if (ret != 0) {
-                            std::cerr << "AX_ENGINE_CreateHandleV2 failed: 0x" << std::hex << ret << "\n";
-                            cleanup();
-                            return 1;
-                        }
-
-                        ret = AX_ENGINE_CreateContextV2(handle, &context);
-                        if (ret != 0) {
-                            std::cerr << "AX_ENGINE_CreateContextV2 failed: 0x" << std::hex << ret << "\n";
-                            cleanup();
-                            return 1;
-                        }
-
-                        ret = AX_ENGINE_GetIOInfo(handle, &info);
-                        if (ret != 0 || !info || info->nInputSize < 1 || info->nOutputSize < 1) {
-                            std::cerr << "AX_ENGINE_GetIOInfo failed: 0x" << std::hex << ret << "\n";
-                            cleanup();
-                            return 1;
+                        check_ax(
+                            AX_ENGINE_CreateHandleV2(
+                                &handle, model.data(), static_cast<AX_U32>(model.size()), &extra),
+                            "AX_ENGINE_CreateHandleV2 failed");
+                        check_ax(AX_ENGINE_CreateContextV2(handle, &context), "AX_ENGINE_CreateContextV2 failed");
+                        check_ax(AX_ENGINE_GetIOInfo(handle, &info), "AX_ENGINE_GetIOInfo failed");
+                        if (!info || info->nInputSize < 1 || info->nOutputSize < 1) {
+                            throw std::runtime_error("model has no input or output tensors");
                         }
 
                         inputs.resize(info->nInputSize);
@@ -592,54 +648,160 @@ class MobileNetRealWorkflowTest(unittest.TestCase):
                         io.nOutputSize = info->nOutputSize;
 
                         for (AX_U32 i = 0; i < info->nInputSize; ++i) {
-                            std::memset(&inputs[i], 0, sizeof(inputs[i]));
-                            inputs[i].nSize = info->pInputs[i].nSize;
-                            ret = AX_SYS_MemAllocCached(
-                                &inputs[i].phyAddr, &inputs[i].pVirAddr, inputs[i].nSize, 128,
-                                reinterpret_cast<const AX_S8*>("mobilenet_input"));
-                            if (ret != 0) {
-                                std::cerr << "AX_SYS_MemAllocCached input failed: 0x" << std::hex << ret << "\n";
-                                cleanup();
-                                return 1;
-                            }
+                            allocate(inputs[i], info->pInputs[i].nSize, "mobilenet_input");
                         }
                         for (AX_U32 i = 0; i < info->nOutputSize; ++i) {
-                            std::memset(&outputs[i], 0, sizeof(outputs[i]));
-                            outputs[i].nSize = info->pOutputs[i].nSize;
-                            ret = AX_SYS_MemAllocCached(
-                                &outputs[i].phyAddr, &outputs[i].pVirAddr, outputs[i].nSize, 128,
-                                reinterpret_cast<const AX_S8*>("mobilenet_output"));
-                            if (ret != 0) {
-                                std::cerr << "AX_SYS_MemAllocCached output failed: 0x" << std::hex << ret << "\n";
-                                cleanup();
-                                return 1;
-                            }
+                            allocate(outputs[i], info->pOutputs[i].nSize, "mobilenet_output");
                         }
+                    }
 
-                        auto input = read_file(argv[2]);
-                        std::memcpy(inputs[0].pVirAddr, input.data(), std::min<size_t>(input.size(), inputs[0].nSize));
-                        AX_SYS_MflushCache(inputs[0].phyAddr, inputs[0].pVirAddr, inputs[0].nSize);
-
-                        ret = AX_ENGINE_RunSyncV2(handle, context, &io);
-                        if (ret != 0) {
-                            std::cerr << "AX_ENGINE_RunSyncV2 failed: 0x" << std::hex << ret << "\n";
-                            cleanup();
-                            return 1;
+                    ~Impl() {
+                        for (auto& item : inputs) {
+                            if (item.phyAddr) AX_SYS_MemFree(item.phyAddr, item.pVirAddr);
                         }
+                        for (auto& item : outputs) {
+                            if (item.phyAddr) AX_SYS_MemFree(item.phyAddr, item.pVirAddr);
+                        }
+                        if (handle) AX_ENGINE_DestroyHandle(handle);
+                        AX_ENGINE_Deinit();
+                        AX_SYS_Deinit();
+                    }
 
-                        AX_SYS_MinvalidateCache(outputs[0].phyAddr, outputs[0].pVirAddr, outputs[0].nSize);
-                        write_file(argv[3], outputs[0].pVirAddr, outputs[0].nSize);
-                        std::cout << "output_bytes=" << outputs[0].nSize << "\n";
-                        cleanup();
+                    static void allocate(AX_ENGINE_IO_BUFFER_T& buffer, AX_U32 size, const char* token) {
+                        std::memset(&buffer, 0, sizeof(buffer));
+                        buffer.nSize = size;
+                        check_ax(
+                            AX_SYS_MemAllocCached(
+                                &buffer.phyAddr, &buffer.pVirAddr, buffer.nSize, 128,
+                                reinterpret_cast<const AX_S8*>(token)),
+                            "AX_SYS_MemAllocCached failed");
+                    }
+                };
+
+                MobileNetRunner::MobileNetRunner(const std::string& model_path)
+                    : impl_(new Impl(model_path)) {}
+
+                MobileNetRunner::~MobileNetRunner() {
+                    delete impl_;
+                }
+
+                std::vector<float> MobileNetRunner::run(const std::vector<float>& input) {
+                    const auto input_bytes = input.size() * sizeof(float);
+                    if (input_bytes > impl_->inputs[0].nSize) {
+                        throw std::runtime_error("input tensor is larger than model input buffer");
+                    }
+                    std::memcpy(impl_->inputs[0].pVirAddr, input.data(), input_bytes);
+                    AX_SYS_MflushCache(impl_->inputs[0].phyAddr, impl_->inputs[0].pVirAddr, impl_->inputs[0].nSize);
+                    check_ax(AX_ENGINE_RunSyncV2(impl_->handle, impl_->context, &impl_->io), "AX_ENGINE_RunSyncV2 failed");
+                    AX_SYS_MinvalidateCache(impl_->outputs[0].phyAddr, impl_->outputs[0].pVirAddr, impl_->outputs[0].nSize);
+
+                    const auto output_count = impl_->outputs[0].nSize / sizeof(float);
+                    std::vector<float> output(output_count);
+                    std::memcpy(output.data(), impl_->outputs[0].pVirAddr, impl_->outputs[0].nSize);
+                    return output;
+                }
+
+                std::vector<Classification> MobileNetRunner::classify(
+                    const std::vector<float>& input,
+                    const std::vector<std::string>& labels,
+                    int k) {
+                    auto logits = run(input);
+                    std::vector<int> indices(logits.size());
+                    std::iota(indices.begin(), indices.end(), 0);
+                    const auto top_count = std::min<int>(k, static_cast<int>(indices.size()));
+                    std::partial_sort(
+                        indices.begin(), indices.begin() + top_count, indices.end(),
+                        [&](int left, int right) { return logits[left] > logits[right]; });
+
+                    std::vector<Classification> result;
+                    for (int rank = 0; rank < top_count; ++rank) {
+                        const int index = indices[rank];
+                        const std::string label =
+                            index < static_cast<int>(labels.size()) ? labels[index] : std::to_string(index);
+                        result.push_back({rank + 1, index, logits[index], label});
+                    }
+                    return result;
+                }
+
+                std::vector<float> read_float_file(const std::string& path) {
+                    auto bytes = read_binary(path);
+                    if (bytes.size() % sizeof(float) != 0) {
+                        throw std::runtime_error("input file size is not aligned to float32");
+                    }
+                    std::vector<float> values(bytes.size() / sizeof(float));
+                    std::memcpy(values.data(), bytes.data(), bytes.size());
+                    return values;
+                }
+
+                void write_float_file(const std::string& path, const std::vector<float>& values) {
+                    std::ofstream file(path, std::ios::binary);
+                    if (!file) {
+                        throw std::runtime_error("failed to write " + path);
+                    }
+                    file.write(
+                        reinterpret_cast<const char*>(values.data()),
+                        static_cast<std::streamsize>(values.size() * sizeof(float)));
+                }
+
+                std::vector<std::string> read_labels(const std::string& path) {
+                    std::ifstream file(path);
+                    if (!file) {
+                        throw std::runtime_error("failed to open labels file " + path);
+                    }
+                    std::vector<std::string> labels;
+                    std::string line;
+                    while (std::getline(file, line)) {
+                        if (!line.empty()) {
+                            labels.push_back(line);
+                        }
+                    }
+                    return labels;
+                }
+                """
+            ),
+            encoding="utf-8",
+        )
+        (cpp_sdk / "examples" / "main.cpp").write_text(
+            textwrap.dedent(
+                """\
+                #include "mobilenet_runner.hpp"
+
+                #include <exception>
+                #include <iostream>
+
+
+                int main(int argc, char** argv) {
+                    if (argc < 4 || argc > 6) {
+                        std::cerr << "usage: " << argv[0]
+                                  << " model.axmodel input.bin output.bin [labels.txt] [topk]\\n";
+                        return 2;
+                    }
+
+                    try {
+                        const std::string labels_path = argc >= 5 ? argv[4] : "imagenet_classes.txt";
+                        const int topk = argc >= 6 ? std::stoi(argv[5]) : 5;
+                        MobileNetRunner classifier(argv[1]);
+                        const auto input = read_float_file(argv[2]);
+                        const auto logits = classifier.run(input);
+                        write_float_file(argv[3], logits);
+
+                        const auto labels = read_labels(labels_path);
+                        for (const auto& item : classifier.classify(input, labels, topk)) {
+                            std::cout << item.rank << ": " << item.label
+                                      << " (" << item.score << ")\\n";
+                        }
                         return 0;
                     } catch (const std::exception& exc) {
-                        std::cerr << exc.what() << "\n";
-                        cleanup();
+                        std::cerr << exc.what() << "\\n";
                         return 1;
                     }
                 }
                 """
             ),
+            encoding="utf-8",
+        )
+        (cpp_sdk / "imagenet_classes.txt").write_text(
+            "\n".join(imagenet_labels) + "\n",
             encoding="utf-8",
         )
         (cpp_sdk / "README.md").write_text(
@@ -649,6 +811,8 @@ class MobileNetRealWorkflowTest(unittest.TestCase):
 
                 该示例直接调用 AX runtime `libax_engine.so`/`libax_sys.so`，需要在主机交叉编译，
                 再把二进制上传到板端运行。不要在板端编译。
+                主要推理逻辑封装在 `MobileNetRunner` 类中；`examples/main.cpp` 只负责实例化
+                该类并输出 ImageNet top-k 分类结果。
 
                 ```bash
                 cmake -S . -B build-aarch64 \\
@@ -806,7 +970,8 @@ class MobileNetRealWorkflowTest(unittest.TestCase):
 
                 ## Python
 
-                Dependencies are intentionally small: `numpy` and `pyaxengine`.
+                Dependencies are intentionally small: `numpy` and `pyaxengine`. The demo
+                instantiates `MobileNetClassifier` and prints ImageNet top-k classes.
 
                 ```bash
                 LD_LIBRARY_PATH=/soc/lib PYTHONPATH=$PWD/python \\
@@ -816,7 +981,9 @@ class MobileNetRealWorkflowTest(unittest.TestCase):
 
                 ## C++
 
-                Cross-compile on the host and run the binary on the AX board.
+                Cross-compile on the host and run the binary on the AX board. The SDK
+                exposes `MobileNetRunner`; `cpp/examples/main.cpp` is only a thin
+                classification demo.
 
                 ```bash
                 cmake -S cpp -B cpp/build-aarch64 \\
@@ -874,7 +1041,8 @@ class MobileNetRealWorkflowTest(unittest.TestCase):
             board,
             "cd {remote} && "
             "LD_LIBRARY_PATH=/soc/lib ./mobilenet_example "
-            "package/models/model.axmodel input.bin cpp_output.bin".format(remote=remote_dir),
+            "package/models/model.axmodel input.bin cpp_output.bin "
+            "package/cpp/imagenet_classes.txt".format(remote=remote_dir),
             timeout=240,
         )
 
@@ -1014,7 +1182,10 @@ class MobileNetRealWorkflowTest(unittest.TestCase):
                 "-std=c++17",
                 "-O2",
                 "-I",
+                str(task_dir / "sdk" / "cpp" / "include"),
+                "-I",
                 str(runtime_root / "include"),
+                str(task_dir / "sdk" / "cpp" / "src" / "mobilenet_runner.cpp"),
                 str(task_dir / "sdk" / "cpp" / "examples" / "main.cpp"),
                 "-L",
                 str(runtime_root / "lib"),
@@ -1099,8 +1270,12 @@ class MobileNetRealWorkflowTest(unittest.TestCase):
             "package/models/model_meta.json",
             "package/python/mobilenet_sdk/inference.py",
             "package/python/requirements.txt",
+            "package/python/imagenet_classes.txt",
             "package/cpp/CMakeLists.txt",
+            "package/cpp/include/mobilenet_runner.hpp",
+            "package/cpp/src/mobilenet_runner.cpp",
             "package/cpp/examples/main.cpp",
+            "package/cpp/imagenet_classes.txt",
             "package/model_convert/README.md",
             "package/model_convert/export_onnx.py",
             "package/model_convert/pulsar2_config.json",
@@ -1123,6 +1298,15 @@ class MobileNetRealWorkflowTest(unittest.TestCase):
         readme = (task_dir / "package/README.md").read_text(encoding="utf-8")
         self.assertIn("standalone customer project", readme)
         self.assertIn("model_convert/pulsar2_config.json", readme)
+        cpp_main = (task_dir / "package/cpp/examples/main.cpp").read_text(encoding="utf-8")
+        self.assertTrue(cpp_main.startswith('#include "mobilenet_runner.hpp"'))
+        self.assertIn("MobileNetRunner classifier", cpp_main)
+        self.assertNotIn("ax_engine_api.h", cpp_main)
+        self.assertFalse(cpp_main.startswith("\\"))
+        cpp_runner = (task_dir / "package/cpp/include/mobilenet_runner.hpp").read_text(encoding="utf-8")
+        self.assertIn("class MobileNetRunner", cpp_runner)
+        py_inference = (task_dir / "package/python/mobilenet_sdk/inference.py").read_text(encoding="utf-8")
+        self.assertIn("class MobileNetClassifier", py_inference)
         config = json.loads(
             (task_dir / "package/model_convert/pulsar2_config.json").read_text(encoding="utf-8")
         )
