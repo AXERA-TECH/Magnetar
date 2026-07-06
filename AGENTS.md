@@ -56,3 +56,16 @@ TASK_DIR/
 - C++ SDK 必须至少通过 CMake configure；存在 aarch64 工具链时执行交叉编译验证，并直接链接 AX Engine runtime。
 - `ax_run_model` 只用于 AXMODEL smoke check，不得作为 Python/C++ SDK 的实现或验证替代。
 - PACKAGE 阶段必须生成可独立作为 git 项目发布的目录，顶层包含 `python/`、`cpp/`、`models/`、`model_convert/` 和 `README.md`。
+
+## 爱芯开发知识
+
+- pulsar2镜像: https://hf-mirror.com/AXERA-TECH/Pulsar2
+- pulsar2文档: https://pulsar2-docs.readthedocs.io/zh-cn/latest/
+- 爱芯HF模型: https://hf-mirror.com/AXERA-TECH
+- 交叉编译器:
+  - AX620E: https://developer.arm.com/-/media/Files/downloads/gnu-a/9.2-2019.12/binrel/gcc-arm-9.2-2019.12-x86_64-aarch64-none-linux-gnu.tar.xz
+  - AX650: https://developer.arm.com/-/media/Files/downloads/gnu-a/9.2-2019.12/binrel/gcc-arm-9.2-2019.12-x86_64-aarch64-none-linux-gnu.tar.xz
+- 爱芯开源Github repos: https://github.com/AXERA-TECH
+- 本机的docker镜像可能已安装pulsar2，应优先使用最新版本
+- 如果需要上板运行，可用remote-infer SKILL完成
+- LLM编译: https://github.com/AXERA-TECH/ax-llm
