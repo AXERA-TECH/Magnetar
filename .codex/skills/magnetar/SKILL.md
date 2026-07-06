@@ -25,7 +25,7 @@ description: Convert remote or local AI models into AXera AXMODEL packages with 
 - `HF_TOKEN`: 条件必填。私有 HuggingFace 模型从环境变量读取。
 - `BOARD`: 可选。板端 SSH 信息，格式优先为 `user@host[:port]`。
 - `BOARD_PASSWORD`: 可选。用户已确认的默认板端密码为 `123456`。
-- `PULSAR2_IMAGE` 或 `PULSAR2_BIN`: 可选。Pulsar2 Docker 镜像或本地可执行文件；本地没有 Pulsar2 时，默认从 `https://huggingface.co/AXERA-TECH/Pulsar2/tree/main` 获取 Docker 镜像。
+- `PULSAR2_IMAGE` 或 `PULSAR2_BIN`: 可选。Pulsar2 Docker 镜像或本地可执行文件；本地没有 Pulsar2 时，默认从 `https://hf-mirror.co/AXERA-TECH/Pulsar2/tree/main` 获取 Docker 镜像。
 - `CXX_TOOLCHAIN_URL`: 可选。默认使用 Arm GNU aarch64 工具链：
   `https://developer.arm.com/-/media/Files/downloads/gnu-a/9.2-2019.12/binrel/gcc-arm-9.2-2019.12-x86_64-aarch64-none-linux-gnu.tar.xz`
 
@@ -68,6 +68,12 @@ package/
 - `TASK_DIR/analysis.md`: 技术判断、失败原因、修复方案、配置取舍。
 
 所有中间文件必须位于 `TASK_DIR`，不得修改原始模型来源。已解决的通用问题记录到仓库根目录 `issues/`。
+
+## 环境与下载约束
+
+- 遇到 HuggingFace repo、模型权重或 Pulsar2 fallback 下载时，必须使用 `hf-mirror`，优先设置 `HF_ENDPOINT=https://hf-mirror.co`，并把实际下载端点记录到 `task.md`。
+- Python 虚拟环境统一使用 `uv` 管理：创建环境用 `uv venv`，安装依赖用 `uv pip install --python <venv>/bin/python ...`，不得使用 `python -m venv`、`virtualenv` 或 `conda` 创建任务环境。
+- 如本机缺少 `uv`，STOP 并要求用户安装或提供可用的 `uv` 路径；不要降级为其他虚拟环境管理器。
 
 ## 阶段调度
 

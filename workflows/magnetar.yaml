@@ -17,7 +17,9 @@ workflow:
       cost_budget: no paid external actions without user approval
       technology:
         - Pulsar2 for ONNX to AXMODEL compilation
-        - Pulsar2 Docker image fallback from https://huggingface.co/AXERA-TECH/Pulsar2/tree/main
+        - Pulsar2 Docker image fallback from https://hf-mirror.co/AXERA-TECH/Pulsar2/tree/main
+        - HuggingFace downloads must use hf-mirror with HF_ENDPOINT=https://hf-mirror.co
+        - Python virtual environments must be managed with uv
         - ONNX static shape
         - onnxruntime for ONNX validation
         - Python SDK with pyaxengine and AxEngineExecutionProvider by default
@@ -54,7 +56,8 @@ workflow:
         - package/README.md
     assumptions:
       - The Arm URL supplied by the user is the C++ cross-compilation toolchain source, not a Pulsar2 distribution.
-      - Pulsar2 is provided by the user environment, a local binary, a user-specified Docker image/package, or the HuggingFace AXERA-TECH/Pulsar2 Docker image fallback.
+      - Pulsar2 is provided by the user environment, a local binary, a user-specified Docker image/package, or the HuggingFace AXERA-TECH/Pulsar2 Docker image fallback through hf-mirror.
+      - uv is required for every task virtual environment; missing uv blocks the workflow instead of falling back to venv, virtualenv, or conda.
       - RUNONBOARD is optional unless BOARD is provided.
       - ax_run_model is only a model smoke check and never substitutes for Python/C++ SDK execution.
     open_questions: []
@@ -134,6 +137,18 @@ workflow:
       source: environment
       validation:
         - required only for private HuggingFace models
+    - id: HF_ENDPOINT
+      type: url
+      required: true
+      source: environment
+      validation:
+        - must be https://hf-mirror.co for HuggingFace downloads
+    - id: uv
+      type: executable
+      required: true
+      source: environment
+      validation:
+        - required for all Python virtual environments
     - id: PULSAR2_IMAGE
       type: text
       required: false
@@ -151,7 +166,7 @@ workflow:
       required: false
       source: external
       validation:
-        - defaults to https://huggingface.co/AXERA-TECH/Pulsar2/tree/main when local Pulsar2 is unavailable
+        - defaults to https://hf-mirror.co/AXERA-TECH/Pulsar2/tree/main when local Pulsar2 is unavailable
     - id: BOARD
       type: text
       required: false
@@ -269,7 +284,7 @@ workflow:
       description: Acquire SOURCE into TASK_DIR/origin and produce manifest
       depends_on: [requirements_gate]
       parallel_group: null
-      inputs: [SOURCE, HF_TOKEN, TASK_DIR]
+      inputs: [SOURCE, HF_TOKEN, TASK_DIR, HF_ENDPOINT]
       outputs: [origin_path, acquire_manifest]
       timeout_seconds: 900
       retry: {max_attempts: 2, retry_on: [network_timeout, partial_download], backoff: exponential}
@@ -281,7 +296,7 @@ workflow:
       description: Initialize TASK_DIR structure and audit logs
       depends_on: [acquire]
       parallel_group: null
-      inputs: [TASK_DIR, MODEL_NAME, TARGET_HARDWARE, acquire_manifest]
+      inputs: [TASK_DIR, MODEL_NAME, TARGET_HARDWARE, acquire_manifest, uv]
       outputs: [task_md, analysis_md]
       timeout_seconds: 120
       retry: {max_attempts: 1, retry_on: [filesystem_transient], backoff: fixed}
@@ -293,7 +308,7 @@ workflow:
       description: Export static ONNX, validate against source model, generate metadata and calibration data
       depends_on: [init]
       parallel_group: null
-      inputs: [origin_path, acquire_manifest, TASK_DIR]
+      inputs: [origin_path, acquire_manifest, TASK_DIR, HF_ENDPOINT, uv]
       outputs: [onnx_path, model_meta_json, calibration_dir, export_report]
       timeout_seconds: 3600
       retry: {max_attempts: 2, retry_on: [import_error, export_failed, validation_mismatch], backoff: none}
@@ -305,7 +320,7 @@ workflow:
       description: Verify Pulsar2 and prepare optional C++ aarch64 toolchain
       depends_on: [export]
       parallel_group: null
-      inputs: [PULSAR2_IMAGE, PULSAR2_BIN, PULSAR2_HF_REPO, TASK_DIR]
+      inputs: [PULSAR2_IMAGE, PULSAR2_BIN, PULSAR2_HF_REPO, TASK_DIR, HF_ENDPOINT]
       outputs: [pulsar2_command, cxx_toolchain_file]
       timeout_seconds: 1200
       retry: {max_attempts: 2, retry_on: [download_failed, docker_pull_failed], backoff: fixed}
@@ -435,9 +450,9 @@ workflow:
       kind: capability
       depends_on: [toolchain]
       pass_when:
-        - PULSAR2_BIN works or PULSAR2_IMAGE works or pulsar2 is on PATH or HuggingFace AXERA-TECH/Pulsar2 image is available
+        - PULSAR2_BIN works or PULSAR2_IMAGE works or pulsar2 is on PATH or HuggingFace AXERA-TECH/Pulsar2 image is available through hf-mirror
       fail_when:
-        - no local, user-provided, or HuggingFace Pulsar2 runtime is available
+        - no local, user-provided, or HuggingFace Pulsar2 runtime is available through hf-mirror
       on_pass: proceed to compile
       on_fail: block and request Pulsar2 source
     - id: export_valid

@@ -55,7 +55,9 @@ package/
 
 ## 工具链
 
-- Pulsar2 为必需能力，可使用用户环境中的 `pulsar2`、`PULSAR2_BIN` 或 `PULSAR2_IMAGE`；本地没有 Pulsar2 时，从 `https://huggingface.co/AXERA-TECH/Pulsar2/tree/main` 获取 Docker 镜像。
+- Pulsar2 为必需能力，可使用用户环境中的 `pulsar2`、`PULSAR2_BIN` 或 `PULSAR2_IMAGE`；本地没有 Pulsar2 时，从 `https://hf-mirror.co/AXERA-TECH/Pulsar2/tree/main` 获取 Docker 镜像。
+- 所有 HuggingFace 下载统一使用 `hf-mirror`，优先设置 `HF_ENDPOINT=https://hf-mirror.co`。
+- 所有任务虚拟环境统一用 `uv` 管理：`uv venv` 创建环境，`uv pip install --python <venv>/bin/python ...` 安装依赖。
 - C++ SDK 默认使用 Arm GNU aarch64 工具链：
   `https://developer.arm.com/-/media/Files/downloads/gnu-a/9.2-2019.12/binrel/gcc-arm-9.2-2019.12-x86_64-aarch64-none-linux-gnu.tar.xz`
 - Python SDK 使用 `pyaxengine`：`https://github.com/AXERA-TECH/pyaxengine`，默认 provider 为 `AxEngineExecutionProvider`。

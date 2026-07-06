@@ -15,9 +15,9 @@ Pulsar2 是必需能力。按顺序检查：
 2. 当前 PATH 中的 `pulsar2`。
 3. `PULSAR2_IMAGE` 指定的 Docker 镜像。
 4. 用户环境已有 AXERA Pulsar2 发布包。
-5. 本地没有 Pulsar2 时，从 HuggingFace `https://huggingface.co/AXERA-TECH/Pulsar2/tree/main` 获取 Docker 镜像或镜像包，并记录下载方式、镜像名和 digest。
+5. 本地没有 Pulsar2 时，设置 `HF_ENDPOINT=https://hf-mirror.co`，从 `https://hf-mirror.co/AXERA-TECH/Pulsar2/tree/main` 获取 Docker 镜像或镜像包，并记录下载方式、镜像名和 digest。
 
-不得把 Arm GNU 工具链压缩包当作 Pulsar2。若本地 Pulsar2 与 HuggingFace fallback 都不可用，STOP 并要求用户提供镜像、二进制路径或安装包。
+不得把 Arm GNU 工具链压缩包当作 Pulsar2。若本地 Pulsar2 与 HuggingFace fallback 都不可用，STOP 并要求用户提供镜像、二进制路径或安装包。所有 HuggingFace fallback 下载必须走 `hf-mirror`，不得直接使用 `huggingface.co` 作为下载端点。
 
 ## C++ 交叉编译工具链
 

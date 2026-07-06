@@ -40,7 +40,14 @@ TASK_DIR/
    - 模型来源
    - 目标芯片
    - 已知约束和假设
-5. 记录环境摘要：Python、pip/uv、docker、pulsar2、cmake、git。
+5. 检查 `uv` 可用性；缺少 `uv` 时 STOP，不得降级到 `python -m venv`、`virtualenv` 或 `conda`。
+6. 记录环境摘要：Python、uv、docker、pulsar2、cmake、git。
+
+## Python 环境约束
+
+- 所有任务虚拟环境必须位于 `TASK_DIR` 内，并用 `uv venv <path>` 创建。
+- 所有依赖安装必须用 `uv pip install --python <venv>/bin/python ...`。
+- 禁止使用 `python -m venv`、`virtualenv` 或 `conda` 创建/管理任务环境。
 
 ## STOP
 
