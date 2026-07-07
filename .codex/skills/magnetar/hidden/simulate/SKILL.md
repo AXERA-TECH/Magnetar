@@ -33,6 +33,12 @@ description: Hidden stage for magnetar. Compare ONNX outputs with AXMODEL simula
 
 通用张量默认 `cosine >= 0.99`（基于均值）。任务指标比单一相对误差优先。
 
+## 精度不达标时的处理流程
+
+1. 搜索仓库 `issues/` 目录，查找是否有与当前模型和错误现象匹配的已知解决方案。
+2. 若找到匹配方案，按方案修复并重新编译、仿真，记录到 `analysis.md`。
+3. 若 `issues/` 中无匹配方案，STOP 并等待用户确认。
+
 ## STOP
 
-精度不达标、仿真工具不可用且无法替代、或需要修改编译配置时停止等待用户确认。
+仿真工具不可用且无法替代、或需要修改编译配置时停止等待用户确认。

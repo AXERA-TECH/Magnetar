@@ -50,6 +50,7 @@ description: Hidden stage for magnetar. Generate customer-facing Python and C++ 
 - CMake 支持本机构建和 aarch64 交叉编译；存在交叉编译工具链时必须执行交叉编译验证。
 - C++ SDK 必须直接调用 AX Engine runtime API，并链接 `libax_engine.so`/`libax_sys.so`（或厂商包中等价的 `libaxengine.so` 命名）。
 - AX runtime 头文件/库未知时，用变量占位：`AX_RUNTIME_ROOT`，目录应包含 `include/` 和 `lib/`。
+- C++ 工程模板参考：https://github.com/ml-inory/Template.axera/tree/main
 - 必须生成可复用 C++ 类，例如 `<ModelName>Runner`、`<ModelName>Classifier` 或任务对应命名；AX runtime 的加载、IO 分配和推理封装在类内部。
 - `examples/` 中的程序只能实例化 SDK 类并调用公开方法，不应把主要推理逻辑写在 example 里。
 - 示例必须按模型实际任务语义编写；分类模型输出 top-k 类别/分数，检测模型输出框/类别/置信度，语音模型输出文本或任务结果。不得只打印 tensor shape 或一堆原始数字作为 demo。

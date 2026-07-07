@@ -97,7 +97,7 @@ package/
 - ONNX 与原模型对分失败。
 - Pulsar2 缺失，且无法从本地路径、用户提供镜像或 HuggingFace `AXERA-TECH/Pulsar2` 镜像运行。
 - 编译失败需要修改模型图或改导出策略。
-- SIMULATE 精度不达标。
+- SIMULATE 精度不达标（先查 `issues/` 目录，无匹配方案再 STOP）。
 - 需要私有模型凭据、板端凭据或其他敏感输入。
 - `BOARD` 未提供（RUNONBOARD 阶段必须执行）。
 
