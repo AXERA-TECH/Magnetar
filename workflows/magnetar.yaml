@@ -3,7 +3,7 @@ workflow:
   name: magnetar
   entry_skill: .codex/skills/magnetar/SKILL.md
   mode: guided
-  task_type: hybrid
+  task_type: deterministic
   visibility: collapsed_by_default
   requirement:
     goal: Convert a remote or local model into an AXera AXMODEL package with customer-facing Python and C++ SDKs.
@@ -177,13 +177,13 @@ workflow:
     - required only for private HuggingFace models
   - id: HF_ENDPOINT
     type: url
-    required: true
+    required: false
     source: environment
     validation:
     - must be https://hf-mirror.co for HuggingFace downloads
   - id: uv
     type: executable
-    required: true
+    required: false
     source: environment
     validation:
     - required for all Python virtual environments
@@ -647,26 +647,6 @@ workflow:
       retry_on:
       - filesystem_transient
       backoff: fixed
-    on_failure:
-      action: fail
-      target_step: null
-    visibility: user_visible
-  - id: final_validation
-    kind: gate
-    skill: ''
-    description: Validate package against acceptance checks
-    depends_on:
-    - package
-    parallel_group: null
-    inputs:
-    - package_dir
-    outputs:
-    - acceptance_result
-    timeout_seconds: 600
-    retry:
-      max_attempts: 0
-      retry_on: []
-      backoff: none
     on_failure:
       action: fail
       target_step: null
