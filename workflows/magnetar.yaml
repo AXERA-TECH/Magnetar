@@ -331,28 +331,37 @@ workflow:
       when: execution starts
     - from: running
       to: validating
-      when: all required execution steps finish
+      when: current step completes and gate validation triggers
     - from: validating
       to: succeeded
-      when: all acceptance checks pass
+      when: gate passes
     - from: validating
       to: retrying
-      when: a recoverable check fails and retry budget remains
+      when: gate fails but retry budget remains and rollback target is set
     - from: retrying
       to: running
-      when: repair step is scheduled
+      when: rollback to target step completed, re-entering execution
+    - from: retrying
+      to: awaiting_user
+      when: retry budget exhausted or issues/ search found no fix — need user decision
     - from: running
       to: rolling_back
-      when: a failure requires rollback
+      when: step on_failure action is rollback
     - from: rolling_back
-      to: failed
-      when: rollback completes and no retry path remains
+      to: running
+      when: target step reached, ready to re-execute
+    - from: rolling_back
+      to: awaiting_user
+      when: rollback requires user input (e.g., accuracy tuning strategy)
     - from: running
       to: degraded
       when: optional capability fails and degraded output is acceptable
     - from: running
       to: blocked
       when: required external input, permission, or credential is unavailable
+    - from: running
+      to: failed
+      when: non-recoverable error or all retry budgets exhausted
   steps:
   - id: requirements_gate
     kind: gate
@@ -451,13 +460,14 @@ workflow:
     retry:
       max_attempts: 2
       retry_on:
-      - import_error
       - export_failed
       - validation_mismatch
+      - compile_rollback
       backoff: none
     on_failure:
       action: ask_user
       target_step: null
+      reason: 多次导出失败，需要用户介入调整模型或提供替代方案
     visibility: user_visible
   - id: toolchain
     kind: agent
@@ -504,13 +514,15 @@ workflow:
     - compile_report
     timeout_seconds: 3600
     retry:
-      max_attempts: 1
+      max_attempts: 2
       retry_on:
+      - compile_failed
       - pulsar2_transient
       backoff: none
     on_failure:
-      action: ask_user
+      action: rollback
       target_step: export
+      reason: Compile失败通常需要调整ONNX导出策略（opset、shape、算子选择等），回退到EXPORT重试
     visibility: user_visible
   - id: simulate
     kind: agent
@@ -533,10 +545,12 @@ workflow:
       max_attempts: 1
       retry_on:
       - simulation_transient
+      - tool_error
       backoff: none
     on_failure:
-      action: ask_user
+      action: rollback
       target_step: compile
+      reason: 仿真工具失败或输出异常，回退到COMPILE调整量化配置
     visibility: user_visible
   - id: accuracy_gate
     kind: gate
@@ -555,8 +569,9 @@ workflow:
       retry_on: []
       backoff: none
     on_failure:
-      action: ask_user
+      action: rollback
       target_step: compile
+      reason: 精度不达标。SIMULATE阶段已搜索issues/目录：有已知方案则自动应用修复后回退到COMPILE；无方案则STOP等待用户决策后再回退
     visibility: user_visible
   - id: sdk_gen
     kind: agent
@@ -723,6 +738,9 @@ workflow:
     default_action: fail
     max_total_attempts: 3
     rollback_required_for:
+    - compile failure → rollback to export (change ONNX export strategy)
+    - simulate tool failure → rollback to compile (adjust quantization config)
+    - accuracy_gate failure → rollback to compile (apply issues/ fix or user-adjusted tuning)
     - package directory rewrite after failed package validation
     ask_user_for:
     - missing SOURCE, TARGET_HARDWARE, or BOARD (checked at requirements gate)
@@ -730,8 +748,9 @@ workflow:
     - ambiguous model file or export entry
     - unavailable Pulsar2
     - random-only calibration data
-    - accuracy below threshold
+    - accuracy below threshold after issues/ search yields no match
     - board credentials
+    - export failed after max retries
     degraded_output_allowed: true
     degraded_conditions:
     - C++ cross compiler unavailable but CMake configure succeeds
