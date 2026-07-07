@@ -41,11 +41,19 @@ workflow:
         - C++ SDK configures with CMake and cross-compiles against AX Engine runtime when the aarch64 toolchain is available
         - when BOARD is provided, Python and C++ SDK examples run on a board whose chip_type matches TARGET_HARDWARE
         - package/README.md explains customer usage
+        - performance_report.md exists with all required sections
       metrics:
         - cosine_similarity
         - mae
         - max_abs_diff
         - task_specific_accuracy_when_available
+        - multi_sample_mean_and_std_for_all_accuracy_metrics
+        - onnx_size_bytes
+        - axmodel_size_bytes
+        - compression_ratio
+        - macs
+        - macs_utilization_pct
+        - inference_latency_ms
       required_artifacts:
         - package/models/model.axmodel
         - package/models/model_meta.json
@@ -53,6 +61,7 @@ workflow:
         - package/cpp/
         - package/model_convert/
         - package/reports/
+        - package/reports/performance_report.md
         - package/README.md
     assumptions:
       - The Arm URL supplied by the user is the C++ cross-compilation toolchain source, not a Pulsar2 distribution.
@@ -212,6 +221,11 @@ workflow:
       required: true
       validation: [contains_usage]
 
+    - id: performance_report
+      type: file
+      destination: TASK_DIR/package/reports/performance_report.md
+      required: true
+      validation: [contains_pipeline_timing, contains_model_efficiency, contains_latency, contains_board_memory]
   state_machine:
     initial: draft
     states:
@@ -345,7 +359,7 @@ workflow:
       depends_on: [compile]
       parallel_group: null
       inputs: [onnx_path, axmodel_path, model_meta_json, TASK_DIR]
-      outputs: [simulate_report, accuracy_metrics]
+      outputs: [simulate_report, accuracy_metrics, simulation_latency_ms]
       timeout_seconds: 1200
       retry: {max_attempts: 1, retry_on: [simulation_transient], backoff: none}
       on_failure: {action: ask_user, target_step: compile}
@@ -405,7 +419,7 @@ workflow:
       depends_on: [sdk_validation]
       parallel_group: null
       inputs: [BOARD, BOARD_PASSWORD, TARGET_HARDWARE, axmodel_path, model_meta_json, TASK_DIR]
-      outputs: [runonboard_report]
+      outputs: [runonboard_report, python_latency_ms, cpp_latency_ms, system_memory_mb, cmm_memory_info]
       timeout_seconds: 1800
       retry: {max_attempts: 1, retry_on: [ssh_transient], backoff: fixed}
       on_failure: {action: degrade, target_step: null}
@@ -417,7 +431,7 @@ workflow:
       depends_on: [runonboard]
       parallel_group: null
       inputs: [axmodel_path, model_meta_json, python_sdk_path, cpp_sdk_path, export_report, compile_report, simulate_report, runonboard_report]
-      outputs: [package_dir, customer_readme]
+      outputs: [package_dir, customer_readme, performance_report]
       timeout_seconds: 300
       retry: {max_attempts: 1, retry_on: [filesystem_transient], backoff: fixed}
       on_failure: {action: fail, target_step: null}
@@ -484,6 +498,7 @@ workflow:
         - model_convert contains ONNX export script and Pulsar2 config
         - RUNONBOARD passed when BOARD was provided
         - README includes customer usage
+        - performance_report.md exists with pipeline timing, model efficiency, latency, and board memory sections
       fail_when:
         - required artifact is missing
       on_pass: succeeded
@@ -527,6 +542,7 @@ workflow:
       - package/model_convert/export_onnx.py exists
       - package/model_convert/pulsar2_config.json exists
       - package/reports/simulate_report.md exists
+      - package/reports/performance_report.md exists
       - package/README.md exists
     failure_when:
       - required Pulsar2 capability is unavailable

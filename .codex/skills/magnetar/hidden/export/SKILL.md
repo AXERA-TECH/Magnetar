@@ -28,9 +28,12 @@ description: Hidden stage for magnetar. Export the acquired model to static-shap
   - `inputs`: name、shape、dtype、layout、preprocess
   - `outputs`: name、shape、dtype、semantic
   - `opset`
+  - `onnx_size_bytes`: ONNX 文件字节数（用于后续压缩比计算）。
   - `tokenizer_path` 或其他附属资源路径。
 - `calib_data/`，优先真实数据。
 - `export_report.md`。
+
+- 记录 ONNX 文件大小（字节）到 `model_meta.json` 的 `onnx_size_bytes` 和 `export_report.md`。
 
 ## 验证
 

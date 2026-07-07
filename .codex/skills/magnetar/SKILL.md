@@ -111,3 +111,12 @@ package/
 - `ax_run_model` 只允许作为 AXMODEL smoke check，不能作为 Python/C++ SDK 的实现或验证替代。
 - `package/model_convert/` 包含 ONNX 导出脚本、实际 Pulsar2 配置和转换说明。
 - `package/README.md` 能指导客户运行 Python/C++ 示例。
+
+- `package/reports/performance_report.md` 存在，含以下内容：
+  - 流水线各阶段耗时与端到端总耗时。
+  - 模型效率：ONNX 大小、AXMODEL 大小、压缩比、MACs、MACs 利用率。
+  - 推理延迟：仿真延迟、板端 Python/C++ SDK 延迟。
+  - 板端内存：系统内存增量、CMM 专用内存（若可获取则记录，否则 N/A）。
+  - 精度汇总（多输入均值 ± 标准差）。
+- 所有性能指标为记录性质，不设硬性通过阈值；获取失败时标记 N/A。
+- `simulate/simulate_report.md` 的精度指标基于 ≥3 组输入样本，报告均值 ± 标准差，同时含仿真单次推理延迟。
