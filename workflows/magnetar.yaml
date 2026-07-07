@@ -558,70 +558,27 @@ workflow:
       action: ask_user
       target_step: compile
     visibility: user_visible
-  - id: sdk_python
+  - id: sdk_gen
     kind: agent
     skill: .codex/skills/magnetar/hidden/sdk-gen/SKILL.md
-    description: Generate Python SDK
+    description: Generate Python and C++ customer SDKs sequentially, validate both after generation
     depends_on:
     - accuracy_gate
-    parallel_group: sdk
-    inputs:
-    - axmodel_path
-    - model_meta_json
-    - MODEL_NAME
-    outputs:
-    - python_sdk_path
-    timeout_seconds: 900
-    retry:
-      max_attempts: 1
-      retry_on:
-      - generation_error
-      backoff: none
-    on_failure:
-      action: fail
-      target_step: null
-    visibility: summarized
-  - id: sdk_cpp
-    kind: agent
-    skill: .codex/skills/magnetar/hidden/sdk-gen/SKILL.md
-    description: Generate C++ SDK
-    depends_on:
-    - accuracy_gate
-    parallel_group: sdk
+    parallel_group: null
     inputs:
     - axmodel_path
     - model_meta_json
     - MODEL_NAME
     - cxx_toolchain_file
     outputs:
+    - python_sdk_path
     - cpp_sdk_path
-    timeout_seconds: 900
+    - sdk_report
+    timeout_seconds: 1800
     retry:
       max_attempts: 1
       retry_on:
       - generation_error
-      backoff: none
-    on_failure:
-      action: fail
-      target_step: null
-    visibility: summarized
-  - id: sdk_validation
-    kind: synthesis
-    skill: .codex/skills/magnetar/hidden/sdk-gen/SKILL.md
-    description: Join Python and C++ SDK generation and validate both
-    depends_on:
-    - sdk_python
-    - sdk_cpp
-    parallel_group: null
-    inputs:
-    - python_sdk_path
-    - cpp_sdk_path
-    outputs:
-    - sdk_report
-    timeout_seconds: 600
-    retry:
-      max_attempts: 1
-      retry_on:
       - validation_failed
       backoff: none
     on_failure:
@@ -633,7 +590,7 @@ workflow:
     skill: .codex/skills/magnetar/hidden/runonboard/SKILL.md
     description: Validate Python and C++ SDKs on the AX board. BOARD is already verified at requirements gate.
     depends_on:
-    - sdk_validation
+    - sdk_gen
     parallel_group: null
     inputs:
     - BOARD

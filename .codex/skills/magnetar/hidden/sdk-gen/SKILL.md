@@ -5,7 +5,7 @@ description: Hidden stage for magnetar. Generate customer-facing Python and C++ 
 
 # SDK-GEN
 
-目标：生成客户可直接集成的 Python/C++ SDK。SDK 自带的 README.md 必须详尽到客户无需查看其他文档即可安装环境、编译、运行示例。
+目标：按顺序生成 Python 和 C++ 客户 SDK，分别验证后输出 sdk_report.md。SDK 自带的 README.md 必须详尽到客户无需查看其他文档即可安装环境、编译、运行示例。
 
 ## Python SDK
 
