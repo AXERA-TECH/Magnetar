@@ -9,7 +9,7 @@ description: Hidden stage for magnetar. Optionally deploy AXMODEL and SDK exampl
 
 ## 执行条件
 
-只有存在 `BOARD` 时执行。未提供 `BOARD` 时不询问，记录为 `skipped` 并进入 PACKAGE。
+必须执行。未提供 `BOARD` 时暂停并等待用户提供板端信息。
 
 ## 步骤
 
