@@ -23,7 +23,7 @@ workflow:
       - onnxruntime for ONNX validation
       - Python SDK with pyaxengine and AxEngineExecutionProvider by default
       - C++ SDK with CMake and direct AX Engine runtime linking
-      - Arm GNU aarch64 toolchain from https://developer.arm.com/-/media/Files/downloads/gnu-a/9.2-2019.12/binrel/gcc-arm-9.2-2019.12-x86_64-aarch64-none-linux-gnu.tar.xz
+      - AX650 BSP SDK V3.10.2 (含 aarch64 交叉编译器 + AX runtime) from hf-mirror; AX620E Arm GNU aarch64 toolchain (待更新)
       security:
       - do not modify source model repositories
       - do not guess private credentials
@@ -121,7 +121,7 @@ workflow:
     - network
     required: true
   - id: cxx_toolchain
-    purpose: Build and validate C++ SDK for aarch64
+    purpose: Build and validate C++ SDK with chip-specific BSP (AX650) or Arm GNU toolchain (AX620E)
     source: install
     skill_path: .codex/skills/magnetar/hidden/toolchain/SKILL.md
     permissions:
@@ -472,7 +472,7 @@ workflow:
   - id: toolchain
     kind: agent
     skill: .codex/skills/magnetar/hidden/toolchain/SKILL.md
-    description: Verify Pulsar2 and prepare optional C++ aarch64 toolchain
+    description: Verify Pulsar2 and prepare chip-specific C++ BSP/toolchain (AX650 BSP SDK / AX620E Arm GNU)
     depends_on:
     - export
     parallel_group: null
@@ -481,10 +481,13 @@ workflow:
     - PULSAR2_BIN
     - PULSAR2_HF_REPO
     - TASK_DIR
+    - TARGET_HARDWARE
+    - CXX_BSP_URL
     - HF_ENDPOINT
     outputs:
     - pulsar2_command
     - cxx_toolchain_file
+    - ax_runtime_root
     timeout_seconds: 1200
     retry:
       max_attempts: 2
@@ -585,6 +588,7 @@ workflow:
     - model_meta_json
     - MODEL_NAME
     - cxx_toolchain_file
+    - ax_runtime_root
     outputs:
     - python_sdk_path
     - cpp_sdk_path

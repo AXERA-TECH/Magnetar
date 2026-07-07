@@ -79,7 +79,7 @@ description: Hidden stage for magnetar. Generate customer-facing Python and C++ 
 
 1. **环境要求**：
    - 本机构建：CMake 版本、C++ 编译器（gcc/clang）。
-   - 交叉编译：aarch64 工具链的下载地址和安装方法，给出完整 URL。
+   - 交叉编译：芯片对应 BSP SDK 的下载地址和安装方法，给出完整 URL。（AX650 使用 AX650 BSP SDK V3.10.2，AX620E 使用 Arm GNU 工具链）。
    - AX runtime：头文件和库文件的获取路径，说明如何设置 `AX_RUNTIME_ROOT`。
 2. **构建步骤**：
    - 本机构建（仅验证编译，不能运行推理）：
@@ -88,7 +88,7 @@ description: Hidden stage for magnetar. Generate customer-facing Python and C++ 
      cmake .. -DCMAKE_BUILD_TYPE=Release
      make -j$(nproc)
      ```
-   - 交叉编译（产物可上板运行）：
+   - 交叉编译（产物可上板运行，需先安装 BSP/工具链）：
      ```
      mkdir build_arm && cd build_arm
      cmake .. -DCMAKE_TOOLCHAIN_FILE=../toolchain-aarch64.cmake -DCMAKE_BUILD_TYPE=Release

@@ -174,7 +174,7 @@ package/
 
 1. **环境要求**：
    - 本机构建：CMake 版本、C++ 编译器（gcc/clang）。
-   - 交叉编译：aarch64 工具链的下载地址和安装方法，给出完整 URL。
+   - 交叉编译：芯片对应 BSP SDK 的下载地址和安装方法，给出完整 URL。（AX650: AX650 BSP SDK V3.10.2，AX620E: Arm GNU 工具链）。
    - AX runtime：头文件和库文件的获取路径，说明如何设置 `AX_RUNTIME_ROOT`。
 2. **构建步骤**：
    - 本机构建（仅验证编译，不能运行推理）：
@@ -183,7 +183,7 @@ package/
      cmake .. -DCMAKE_BUILD_TYPE=Release
      make -j$(nproc)
      ```
-   - 交叉编译（产物可上板运行）：
+   - 交叉编译（产物可上板运行，需先安装 BSP/工具链）：
      ```
      mkdir build_arm && cd build_arm
      cmake .. -DCMAKE_TOOLCHAIN_FILE=../toolchain-aarch64.cmake -DCMAKE_BUILD_TYPE=Release
@@ -304,7 +304,7 @@ Pillow
 
 - 必需文件齐全：`model_convert/requirements.txt`、`model_convert/compile_pulsar2.sh`、`model_convert/export_onnx.py`。
 - 所有 README 中的命令完整无省略、可直接复制执行。
-- 环境安装说明覆盖 Python、Pulsar2（Docker）、交叉编译工具链。
+- 环境安装说明覆盖 Python、Pulsar2（Docker）、芯片 BSP/交叉编译工具链。
 - `package/reports/performance_report.md` 存在且各节内容完整（缺失数据标 N/A）。
 - `package/` 可作为项目根目录阅读和构建，客户不需要理解 `TASK_DIR` 内部结构。
 - README 不依赖内部临时路径才能理解。

@@ -62,9 +62,12 @@ TASK_DIR/
 - pulsar2镜像: https://hf-mirror.com/AXERA-TECH/Pulsar2
 - pulsar2文档: https://pulsar2-docs.readthedocs.io/zh-cn/latest/
 - 爱芯HF模型: https://hf-mirror.com/AXERA-TECH
-- 交叉编译器:
-  - AX620E: https://developer.arm.com/-/media/Files/downloads/gnu-a/9.2-2019.12/binrel/gcc-arm-9.2-2019.12-x86_64-aarch64-none-linux-gnu.tar.xz
-  - AX650: https://developer.arm.com/-/media/Files/downloads/gnu-a/9.2-2019.12/binrel/gcc-arm-9.2-2019.12-x86_64-aarch64-none-linux-gnu.tar.xz
+- C++ BSP / 交叉编译器:
+  - AX650 BSP SDK (含交叉编译器 + AX runtime头文件和库):
+    下载: https://hf-mirror.com/AXERA-TECH/AX650-Community-Hub/resolve/main/sdk/edge-computing-AX650_SDK_V3.10.2/02.%20SDK/AX650_SDK_V3.10.2/AX650_SDK_V3.10.2_20260513151335.tgz
+    HF页面: https://hf-mirror.com/AXERA-TECH/AX650-Community-Hub/tree/main/sdk/edge-computing-AX650_SDK_V3.10.2/02.%20SDK/AX650_SDK_V3.10.2
+  - AX620E (待更新，暂用 Arm GNU 裸工具链):
+    https://developer.arm.com/-/media/Files/downloads/gnu-a/9.2-2019.12/binrel/gcc-arm-9.2-2019.12-x86_64-aarch64-none-linux-gnu.tar.xz
 - 爱芯开源Github repos: https://github.com/AXERA-TECH
 - 本机的docker镜像可能已安装pulsar2，应优先使用最新版本
 - 如果需要上板运行，可用remote-infer SKILL完成

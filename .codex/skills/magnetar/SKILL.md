@@ -26,8 +26,9 @@ description: Convert remote or local AI models into AXera AXMODEL packages with 
 - `BOARD`: 必填。板端 SSH 信息，格式优先为 `user@host[:port]`。入口即检查，缺失时 STOP。
 - `BOARD_PASSWORD`: 必填。用户已确认的默认板端密码为 `123456`。
 - `PULSAR2_IMAGE` 或 `PULSAR2_BIN`: 可选。Pulsar2 Docker 镜像或本地可执行文件；本地没有 Pulsar2 时，默认从 `https://hf-mirror.co/AXERA-TECH/Pulsar2/tree/main` 获取 Docker 镜像。
-- `CXX_TOOLCHAIN_URL`: 可选。默认使用 Arm GNU aarch64 工具链：
-  `https://developer.arm.com/-/media/Files/downloads/gnu-a/9.2-2019.12/binrel/gcc-arm-9.2-2019.12-x86_64-aarch64-none-linux-gnu.tar.xz`
+- `CXX_BSP_URL`: 可选。C++ BSP SDK 下载地址，含交叉编译器和 AX runtime。默认按目标芯片选择：
+  - AX650: `https://hf-mirror.com/AXERA-TECH/AX650-Community-Hub/resolve/main/sdk/edge-computing-AX650_SDK_V3.10.2/02.%20SDK/AX650_SDK_V3.10.2/AX650_SDK_V3.10.2_20260513151335.tgz`
+  - AX620E: `https://developer.arm.com/-/media/Files/downloads/gnu-a/9.2-2019.12/binrel/gcc-arm-9.2-2019.12-x86_64-aarch64-none-linux-gnu.tar.xz`（待更新为BSP）
 
 ## 输出
 
@@ -112,7 +113,7 @@ package/
 - `compile/model.axmodel` 存在。
 - `simulate/simulate_report.md` 给出 ONNX vs AXMODEL 指标，默认 `cosine >= 0.99` 或任务语义等价。
 - Python SDK import 成功；上板验证时必须使用 `pyaxengine`/`AxEngineExecutionProvider` 真实运行。
-- C++ SDK 至少 `cmake configure` 成功；存在工具链时完成交叉编译，上板验证时必须链接 AX Engine runtime 真实运行。
+- C++ SDK 至少 `cmake configure` 成功；存在 BSP（含交叉编译器和 AX runtime）时完成交叉编译，上板验证时必须链接 AX Engine runtime 真实运行。
 - `ax_run_model` 只允许作为 AXMODEL smoke check，不能作为 Python/C++ SDK 的实现或验证替代。
 
 - `package/` 满足客户从零复现的全部要求：
@@ -120,7 +121,7 @@ package/
   - `package/model_convert/` 包含 `requirements.txt`、`export_onnx.py`、`compile_pulsar2.sh`、完整 pulsar2 配置和 README，客户可按步骤从 ONNX 导出到 AXMODEL 编译。
   - `package/model_convert/README.md` 覆盖环境准备（Python、Docker、Pulsar2）、ONNX 导出、校准数据、编译命令（完整无省略）、产物检查、常见问题。
   - `package/python/README.md` 覆盖环境安装、运行示例、API 说明。
-  - `package/cpp/README.md` 覆盖本机构建、交叉编译、上板运行、API 说明。
+  - `package/cpp/README.md` 覆盖本机构建、BSP 安装和交叉编译、上板运行、API 说明。
   - 所有 README 中的命令完整无省略，可直接复制执行，不依赖客户机器的预设路径。
   - `package/` 不包含原始私有凭据、缓存、虚拟环境、node_modules 或大型无关中间文件。
 
