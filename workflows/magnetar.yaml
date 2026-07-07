@@ -211,7 +211,8 @@ workflow:
     source: user
     validation:
     - user@host[:port]
-    description: Board SSH info, format user@host[:port]. RUNONBOARD is mandatory.
+    description: Board SSH info, format user@host[:port]. Required upfront — checked at requirements gate before any stage
+      runs.
   - id: BOARD_PASSWORD
     type: credential
     required: true
@@ -356,12 +357,13 @@ workflow:
   - id: requirements_gate
     kind: gate
     skill: ''
-    description: Verify SOURCE, TARGET_HARDWARE, and required capability sources
+    description: Verify SOURCE, TARGET_HARDWARE, BOARD, and required capability sources before any execution
     depends_on: []
     parallel_group: null
     inputs:
     - SOURCE
     - TARGET_HARDWARE
+    - BOARD
     - PULSAR2_IMAGE
     - PULSAR2_BIN
     outputs:
@@ -629,7 +631,7 @@ workflow:
   - id: runonboard
     kind: agent
     skill: .codex/skills/magnetar/hidden/runonboard/SKILL.md
-    description: 'Validate Python and C++ SDKs on an AX board matching TARGET_HARDWARE. Mandatory: STOP if BOARD not provided.'
+    description: Validate Python and C++ SDKs on the AX board. BOARD is already verified at requirements gate.
     depends_on:
     - sdk_validation
     parallel_group: null
@@ -719,10 +721,12 @@ workflow:
     pass_when:
     - SOURCE is provided
     - TARGET_HARDWARE is provided
+    - BOARD is provided (RUNONBOARD is mandatory)
     fail_when:
     - required input is missing
+    - BOARD is not provided
     on_pass: proceed to acquire
-    on_fail: ask user for missing input
+    on_fail: ask user for missing input (including BOARD)
   - id: pulsar2_available
     kind: capability
     depends_on:
@@ -784,8 +788,7 @@ workflow:
     rollback_required_for:
     - package directory rewrite after failed package validation
     ask_user_for:
-    - missing SOURCE or TARGET_HARDWARE
-    - missing BOARD (RUNONBOARD is mandatory)
+    - missing SOURCE, TARGET_HARDWARE, or BOARD (checked at requirements gate)
     - private model credentials
     - ambiguous model file or export entry
     - unavailable Pulsar2
@@ -829,7 +832,7 @@ workflow:
     - AXMODEL compile fails with no accepted repair path
     - SDK generation fails
     - acceptance checks fail after retry budget is exhausted
-    - BOARD was not provided so RUNONBOARD cannot execute
+    - BOARD was not provided (checked at requirements gate, should never reach here)
     final_response:
       include_artifacts: true
       include_assumptions: true

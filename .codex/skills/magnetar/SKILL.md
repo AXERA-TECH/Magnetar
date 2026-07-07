@@ -11,7 +11,7 @@ description: Convert remote or local AI models into AXera AXMODEL packages with 
 
 `ACQUIRE -> INIT -> EXPORT -> TOOLCHAIN -> COMPILE -> SIMULATE -> SDK-GEN -> RUNONBOARD -> PACKAGE`
 
-`RUNONBOARD` 必须执行。若未提供 `BOARD`，暂停等待用户提供板端信息。遇到 `STOP` 必须暂停等待用户确认。
+`RUNONBOARD` 必须执行。`BOARD` 在工作流入口即检查，缺失时立即 STOP，不会先执行前置阶段。遇到 `STOP` 必须暂停等待用户确认。
 
 机器可读规范见 [../../workflows/magnetar.yaml](../../workflows/magnetar.yaml)。
 
@@ -23,8 +23,8 @@ description: Convert remote or local AI models into AXera AXMODEL packages with 
 - `TASK_DIR`: 可选。默认 `todos/work/<timestamp>-<model-name>/`。
 - `SDK_LANG`: 可选。`python`、`cpp`、`both`，默认 `both`。
 - `HF_TOKEN`: 条件必填。私有 HuggingFace 模型从环境变量读取。
-- `BOARD`: 可选。板端 SSH 信息，格式优先为 `user@host[:port]`。
-- `BOARD_PASSWORD`: 可选。用户已确认的默认板端密码为 `123456`。
+- `BOARD`: 必填。板端 SSH 信息，格式优先为 `user@host[:port]`。入口即检查，缺失时 STOP。
+- `BOARD_PASSWORD`: 必填。用户已确认的默认板端密码为 `123456`。
 - `PULSAR2_IMAGE` 或 `PULSAR2_BIN`: 可选。Pulsar2 Docker 镜像或本地可执行文件；本地没有 Pulsar2 时，默认从 `https://hf-mirror.co/AXERA-TECH/Pulsar2/tree/main` 获取 Docker 镜像。
 - `CXX_TOOLCHAIN_URL`: 可选。默认使用 Arm GNU aarch64 工具链：
   `https://developer.arm.com/-/media/Files/downloads/gnu-a/9.2-2019.12/binrel/gcc-arm-9.2-2019.12-x86_64-aarch64-none-linux-gnu.tar.xz`
@@ -95,7 +95,7 @@ package/
 
 必须 STOP 的情况：
 
-- `SOURCE` 或 `TARGET_HARDWARE` 缺失。
+- `SOURCE`、`TARGET_HARDWARE` 或 `BOARD` 缺失（入口即检查，防止无效执行）。
 - 主模型文件或导出入口无法自动判断。
 - 只能使用随机校准数据，且用户未确认。
 - ONNX 与原模型对分失败。
@@ -103,7 +103,7 @@ package/
 - 编译失败需要修改模型图或改导出策略。
 - SIMULATE 精度不达标（先查 `issues/` 目录，无匹配方案再 STOP）。
 - 需要私有模型凭据、板端凭据或其他敏感输入。
-- `BOARD` 未提供（RUNONBOARD 阶段必须执行）。
+
 
 ## 接受标准
 
