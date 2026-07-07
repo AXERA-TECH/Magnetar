@@ -31,34 +31,38 @@ description: Convert remote or local AI models into AXera AXMODEL packages with 
 
 ## 输出
 
-最终交付目录为 `TASK_DIR/package/`：
+最终交付目录为 `TASK_DIR/package/`，必须是一份客户拿到后能从零复现模型转换并运行 Python/C++ SDK 的完整交付包：
 
 ```text
 package/
-  README.md
+  README.md           # 顶层入口：模型概述、快速开始（推理/转换两条路径）、目录说明
   .gitignore
   models/
-    model.axmodel
-    model_meta.json
+    model.axmodel      # 已编译的 AXMODEL
+    model_meta.json    # 模型元信息
   python/
+    README.md          # Python SDK 使用说明（环境安装、运行、API）
+    requirements.txt
+    <model>_sdk/
   cpp/
+    README.md          # C++ SDK 构建说明（本地/交叉编译、上板运行、API）
+    CMakeLists.txt
+    toolchain-aarch64.cmake
+    include/
+    src/
+    examples/
   model_convert/
-    README.md
-    export_onnx.py
+    README.md          # 从零复现的完整说明（环境、导出、校准、编译、产物检查）
+    requirements.txt   # 复现所需 Python 依赖
+    export_onnx.py     # ONNX 导出脚本
     model.onnx
     model_meta.json
     pulsar2_config.json
-    compile_pulsar2.sh
+    compile_pulsar2.sh # 可直接执行的编译脚本
+    calib_data.tar     # 校准数据（或 README 中说明如何生成）
   reports/
-    export_report.md
-    compile_report.md
-    simulate_report.md
-    runonboard_report.md   # 如果执行了 RUNONBOARD
-  task.md
-  analysis.md
+    performance_report.md
 ```
-
-`package/` 必须是一个可独立作为 git 仓库发布的客户项目目录。SDK 依赖保持最小化；模型转换过程必须在 `model_convert/` 中可追溯。
 
 ## 强制记录
 
@@ -110,8 +114,15 @@ package/
 - Python SDK import 成功；上板验证时必须使用 `pyaxengine`/`AxEngineExecutionProvider` 真实运行。
 - C++ SDK 至少 `cmake configure` 成功；存在工具链时完成交叉编译，上板验证时必须链接 AX Engine runtime 真实运行。
 - `ax_run_model` 只允许作为 AXMODEL smoke check，不能作为 Python/C++ SDK 的实现或验证替代。
-- `package/model_convert/` 包含 ONNX 导出脚本、实际 Pulsar2 配置和转换说明。
-- `package/README.md` 能指导客户运行 Python/C++ 示例。
+
+- `package/` 满足客户从零复现的全部要求：
+  - `package/README.md` 详尽覆盖模型概述、快速开始（推理/复现两条路径）、目录说明、性能摘要、已知限制。
+  - `package/model_convert/` 包含 `requirements.txt`、`export_onnx.py`、`compile_pulsar2.sh`、完整 pulsar2 配置和 README，客户可按步骤从 ONNX 导出到 AXMODEL 编译。
+  - `package/model_convert/README.md` 覆盖环境准备（Python、Docker、Pulsar2）、ONNX 导出、校准数据、编译命令（完整无省略）、产物检查、常见问题。
+  - `package/python/README.md` 覆盖环境安装、运行示例、API 说明。
+  - `package/cpp/README.md` 覆盖本机构建、交叉编译、上板运行、API 说明。
+  - 所有 README 中的命令完整无省略，可直接复制执行，不依赖客户机器的预设路径。
+  - `package/` 不包含原始私有凭据、缓存、虚拟环境、node_modules 或大型无关中间文件。
 
 - `package/reports/performance_report.md` 存在，含以下内容：
   - 流水线各阶段耗时与端到端总耗时。

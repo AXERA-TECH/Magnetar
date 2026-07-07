@@ -5,7 +5,7 @@ description: Hidden stage for magnetar. Generate customer-facing Python and C++ 
 
 # SDK-GEN
 
-目标：生成客户可直接集成的 Python/C++ SDK。
+目标：生成客户可直接集成的 Python/C++ SDK。SDK 自带的 README.md 必须详尽到客户无需查看其他文档即可安装环境、编译、运行示例。
 
 ## Python SDK
 
@@ -18,8 +18,12 @@ description: Hidden stage for magnetar. Generate customer-facing Python and C++ 
 - `preprocess.py`
 - `postprocess.py`
 - `example.py`
-- `README.md`
 - `requirements.txt`
+- `README.md`（详见下方 [Python SDK README.md](#python-sdk-readmemd)）
+
+上级目录 `TASK_DIR/sdk/python/` 必须包含：
+- `requirements.txt`（顶层依赖，如 pyaxengine）
+- `README.md`（Python SDK 总览，含环境安装和快速运行）
 
 实现要求：
 
@@ -32,6 +36,18 @@ description: Hidden stage for magnetar. Generate customer-facing Python and C++ 
 - `python -c "import <model_name>_sdk"` 必须通过。
 - 不得调用 `ax_run_model` 实现 Python SDK 推理。
 
+## Python SDK README.md
+
+`TASK_DIR/sdk/python/README.md` 必须包含：
+
+1. **环境要求**：Python 版本、系统依赖（如 libgl1）。
+2. **安装步骤**：
+   - 完整的 `pip install -r requirements.txt` 命令。
+   - 若 `pyaxengine` 需从源码安装，给出完整的 `git clone` + `pip install` 命令。
+3. **快速运行**：完整命令行示例，含输入文件格式要求。
+4. **API 说明**：SDK 类的初始化参数、推理方法签名、返回值结构。
+5. **输入预处理说明**：resize 策略、归一化参数、颜色通道顺序。
+
 ## C++ SDK
 
 目录：`TASK_DIR/sdk/cpp/`
@@ -43,7 +59,7 @@ description: Hidden stage for magnetar. Generate customer-facing Python and C++ 
 - `examples/`
 - `CMakeLists.txt`
 - `toolchain-aarch64.cmake`
-- `README.md`
+- `README.md`（详见下方 [C++ SDK README.md](#c-sdk-readmemd)）
 
 实现要求：
 
@@ -55,12 +71,38 @@ description: Hidden stage for magnetar. Generate customer-facing Python and C++ 
 - `examples/` 中的程序只能实例化 SDK 类并调用公开方法，不应把主要推理逻辑写在 example 里。
 - 示例必须按模型实际任务语义编写；分类模型输出 top-k 类别/分数，检测模型输出框/类别/置信度，语音模型输出文本或任务结果。不得只打印 tensor shape 或一堆原始数字作为 demo。
 - 不得调用 `ax_run_model` 实现 C++ SDK 推理。
-- 有工具链时执行交叉编译；否则至少执行 `cmake -S . -B build`.
+- 有工具链时执行交叉编译；否则至少执行 `cmake -S . -B build`。
+
+## C++ SDK README.md
+
+`TASK_DIR/sdk/cpp/README.md` 必须包含：
+
+1. **环境要求**：
+   - 本机构建：CMake 版本、C++ 编译器（gcc/clang）。
+   - 交叉编译：aarch64 工具链的下载地址和安装方法，给出完整 URL。
+   - AX runtime：头文件和库文件的获取路径，说明如何设置 `AX_RUNTIME_ROOT`。
+2. **构建步骤**：
+   - 本机构建（仅验证编译，不能运行推理）：
+     ```
+     mkdir build && cd build
+     cmake .. -DCMAKE_BUILD_TYPE=Release
+     make -j$(nproc)
+     ```
+   - 交叉编译（产物可上板运行）：
+     ```
+     mkdir build_arm && cd build_arm
+     cmake .. -DCMAKE_TOOLCHAIN_FILE=../toolchain-aarch64.cmake -DCMAKE_BUILD_TYPE=Release
+     make -j$(nproc)
+     ```
+3. **上板运行**：如何将编译产物传到板端、设置 `LD_LIBRARY_PATH`、运行示例。
+4. **API 说明**：类的构造、初始化、推理方法、输入输出数据格式。
 
 ## 验证
 
 - Python import 成功。
 - C++ cmake configure 成功。
+- Python SDK README 覆盖环境安装、运行示例、API 说明。
+- C++ SDK README 覆盖本地/交叉编译、上板运行、API 说明。
 - 生成 `sdk/sdk_report.md`。
 
 ## STOP
