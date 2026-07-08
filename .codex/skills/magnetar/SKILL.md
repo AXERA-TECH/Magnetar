@@ -109,6 +109,7 @@ package/
 - 主模型文件或导出入口无法自动判断。
 - 只能使用随机校准数据，且用户未确认。
 - ONNX 与原模型对分失败。
+- ONNX 存在动态 shape，且静态化失败（Pulsar2 不接受动态 ONNX）。
 - Pulsar2 缺失，且无法从本地路径、用户提供镜像或 HuggingFace `AXERA-TECH/Pulsar2` 镜像运行。
 - 编译失败需要修改模型图或改导出策略。
 - SIMULATE 精度不达标（先查 `issues/` 目录，无匹配方案再 STOP）。

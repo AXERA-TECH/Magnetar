@@ -7,6 +7,10 @@ description: Hidden stage for magnetar. Compile static ONNX to AXMODEL with Puls
 
 目标：用 Pulsar2 把 `export/model.onnx` 编译为 `compile/model.axmodel`，并采集编译效率指标。
 
+## 入口检查
+
+进入 COMPILE 前必须确认 `export/model.onnx` 已为静态 shape。Pulsar2 不接受动态维度——`input_shapes` 配置无法覆盖 ONNX 图中定义的动态维度名。若模型仍含动态维度，必须退回 EXPORT 阶段完成静态化。
+
 ## 步骤
 
 1. 读取 `export/model_meta.json` 和校准集。

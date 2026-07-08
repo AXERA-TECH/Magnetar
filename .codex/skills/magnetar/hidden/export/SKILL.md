@@ -24,6 +24,17 @@ description: Hidden stage for magnetar. Export the acquired model to static-shap
 4. PyTorch 权重：读取 README/源码，编写最小原模型推理脚本和静态导出脚本。
 5. 其他框架：先寻找官方 ONNX 导出路径；无法判断时 STOP。
 
+## Pulsar2 静态 ONNX 约束
+
+Pulsar2 仅支持静态 shape 的 ONNX。所有输入维度必须为具体整数值，不得保留动态维度名（如 `batch_size`、`feats_length`）。`input_shapes` 配置无法覆盖 ONNX 图中已定义的动态维度——模型本身必须静态化。
+
+若 ACQUIRE 阶段的 ONNX 存在动态 shape，必须在 EXPORT 阶段完成静态化：
+- 用 `onnxruntime` 加载后进行 shape inference（`onnx.shape_inference`）。
+- 若 shape inference 无法解析动态维度，用 `onnx.tools.update_model_dims` 或等价方法将 `dim_param` 重写为 `dim_value`。
+- 验证 `onnx.checker.check_model()` 通过，且再次确认所有输入 shape 为具体整数。
+
+禁止将动态 ONNX 带入 COMPILE 阶段。
+
 ## 必须产物
 
 - `test-source.py` 或等价原模型推理脚本。
