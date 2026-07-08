@@ -9,6 +9,15 @@ description: Convert remote or local AI models into AXera AXMODEL packages with 
 
 严格按以下顺序推进：
 
+## 阶段不可跳过
+
+所有 9 个阶段必须全部遍历，不可跳过。即使用户直接提供了 ONNX 模型文件，ACQUIRE 和 EXPORT 阶段同样必须执行，按各阶段的产物和验证要求完成全量检查：
+
+- ACQUIRE 必须产出来源记录和候选文件清单，即使 SOURCE 是单个 ONNX 文件。
+- EXPORT 必须完成 ONNX checker、ONNX Runtime 加载、model_meta.json、校准数据和导出报告，即使模型本身已经是 ONNX 格式。
+- 跳过任一阶段会导致后续产物缺失（如 manifest.json、model_meta.json、校准数据），最终 PACKAGE 交付包将不满足客户从零复现的要求。
+
+
 `ACQUIRE -> INIT -> EXPORT -> TOOLCHAIN -> COMPILE -> SIMULATE -> SDK-GEN -> RUNONBOARD -> PACKAGE`
 
 `RUNONBOARD` 必须执行。`BOARD` 在工作流入口即检查，缺失时立即 STOP，不会先执行前置阶段。遇到 `STOP` 必须暂停等待用户确认。

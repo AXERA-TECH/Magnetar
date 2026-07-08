@@ -11,7 +11,14 @@ description: Hidden stage for magnetar. Export the acquired model to static-shap
 
 按优先级选择：
 
-1. 已有静态 ONNX：验证后复制为 `export/model.onnx`。
+1. 已有静态 ONNX（来自 ACQUIRE 阶段的 `origin/`）：不得直接复制为 `export/model.onnx` 即视为完成。必须执行以下全部验证步骤后，方可进入下一阶段：
+   - `onnx.checker.check_model()` 通过。
+   - `onnxruntime.InferenceSession()` 可加载并完成一次推理。
+   - 确认所有输入为静态 shape；存在动态维度时必须静态化。
+   - 生成 `model_meta.json`（含完整 input/output shape/dtype/layout）。
+   - 生成校准数据（≥3 组，优先真实数据）。
+   - 生成 `export_report.md`。
+   所有产物写入 `TASK_DIR/export/`，包括从 `origin/` 复制过来的 ONNX。
 2. 上游导出脚本：改造成可复现的 `export-static-onnx.py`。
 3. HuggingFace Transformers：优先 `optimum-cli export onnx`，失败后使用 `torch.onnx.export`。
 4. PyTorch 权重：读取 README/源码，编写最小原模型推理脚本和静态导出脚本。

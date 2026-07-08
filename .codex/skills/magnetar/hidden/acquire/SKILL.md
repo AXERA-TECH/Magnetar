@@ -16,11 +16,15 @@ description: Hidden stage for magnetar. Acquire a remote or local model into TAS
    - HTTP/HTTPS 文件: 下载到 `origin/`
    - 本地目录: 复制目录内容到 `origin/`
    - 本地文件: 复制到 `origin/`
-3. 扫描候选文件：
+3. 若 SOURCE 是单个 ONNX 文件：仍需执行完整 ACQUIRE 流程。将该文件复制到 `origin/`，扫描候选时重点记录：
+   - ONNX 文件路径、大小、opset 版本。
+   - 附带文件（tokenizer、config、README 等）一并复制。
+   - manifest 中需标注 `source_type` 为 `"local-onnx"` 或 `"download-onnx"`。
+4. 扫描候选文件：
    - 权重：`*.onnx`、`*.pt`、`*.pth`、`*.safetensors`、`*.bin`、`*.pdmodel`
    - 配置：`config.json`、`*.yaml`、`*.yml`
    - 导出脚本：`export.py`、`tools/export*.py`、`scripts/export*.py`
-4. 输出 `cache/acquire/manifest.json`：
+5. 输出 `cache/acquire/manifest.json`：
    - `source`
    - `source_type`
    - `origin_path`
