@@ -99,7 +99,7 @@ package/
 - `SIMULATE`: 读取 [hidden/simulate/SKILL.md](hidden/simulate/SKILL.md)。
 - `SDK-GEN`: 读取 [hidden/sdk-gen/SKILL.md](hidden/sdk-gen/SKILL.md)。
 - `RUNONBOARD`: 读取 [hidden/runonboard/SKILL.md](hidden/runonboard/SKILL.md)。
-- `PACKAGE`: 读取 [hidden/package/SKILL.md](hidden/package/SKILL.md)。
+- `PACKAGE`: 读取 [hidden/package/SKILL.md](hidden/package/SKILL.md)。该阶段必须以"客户从零开始看 GitHub 仓库"的视角生成 package/，完成后自动上板按 README 从零搭建环境、编译、运行，发现任何卡点立即修正，直到客户能无阻碍复现为止。
 
 ## STOP 点
 
@@ -126,7 +126,7 @@ package/
 - C++ SDK 至少 `cmake configure` 成功；存在 BSP（含交叉编译器和 AX runtime）时完成交叉编译，上板验证时必须链接 AX Engine runtime 真实运行。
 - `ax_run_model` 只允许作为 AXMODEL smoke check，不能作为 Python/C++ SDK 的实现或验证替代。
 
-- `package/` 满足客户从零复现的全部要求：
+- `package/` 满足客户从零复现的全部要求，并通过板端自验证：
   - `package/README.md` 详尽覆盖模型概述、快速开始（推理/复现两条路径）、目录说明、性能摘要、已知限制。
   - `package/model_convert/` 包含 `requirements.txt`、`export_onnx.py`、`compile_pulsar2.sh`、完整 pulsar2 配置和 README，客户可按步骤从 ONNX 导出到 AXMODEL 编译。
   - `package/model_convert/README.md` 覆盖环境准备（Python、Docker、Pulsar2）、ONNX 导出、校准数据、编译命令（完整无省略）、产物检查、常见问题。
@@ -135,6 +135,7 @@ package/
   - 所有 README 中的命令完整无省略，可直接复制执行，不依赖客户机器的预设路径。
   - `package/` 不包含原始私有凭据、缓存、虚拟环境、node_modules 或大型无关中间文件。
 
+  - `package/` 已通过板端自验证：将整个 `package/` 目录推送到目标板端，严格按照 `package/README.md` 和 `model_convert/README.md` 的步骤从零安装环境、编译、运行推理，所有命令可无障碍执行，无遗漏依赖或错误路径。验证过程中发现的任何问题均在 `package/` 内就地修正并重新验证，直到 README 中所有步骤可连续无中断执行完毕。
 - `package/reports/performance_report.md` 存在，含以下内容：
   - 流水线各阶段耗时与端到端总耗时。
   - 模型效率：ONNX 大小、AXMODEL 大小、压缩比、MACs、MACs 利用率。

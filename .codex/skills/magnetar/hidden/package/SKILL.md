@@ -309,3 +309,85 @@ Pillow
 - `package/` 可作为项目根目录阅读和构建，客户不需要理解 `TASK_DIR` 内部结构。
 - README 不依赖内部临时路径才能理解。
 - `package/` 中不包含原始私有凭据、缓存、虚拟环境、node_modules 或大型无关中间文件。
+
+## 板端自验证
+
+生成 `package/` 后，必须以"客户从零开始看 GitHub 仓库"的视角，将整个交付包部署到目标板端并严格按 README 步骤执行。这是 PACKAGE 阶段不可跳过的核心环节，目的是确保客户拿到包后能无障碍复现。
+
+### 原则
+
+- **以 README 为准**：严格按 `package/README.md`、`package/model_convert/README.md`、`package/python/README.md`、`package/cpp/README.md` 中的命令执行，不依赖 TASK_DIR 内部路径或预设环境。
+- **在板端做验证**：将 `package/` 完整推送到板端，不依赖主机临时代理。
+- **即时修正**：发现任何 README 命令不可执行、脚本报错、依赖缺失、路径错误等问题，立即在 `package/` 内就地修正，并重新验证，直到所有步骤可连续无中断执行。
+- **修正范围**：只修改 `package/` 内的 README、脚本和配置文件，不动 TASK_DIR 其他阶段产物。
+
+### 步骤
+
+#### 1. 推送 package/ 到板端
+
+使用 `scp -r` 或等效方式将整个 `package/` 目录推送到板端用户可写的位置：
+
+```bash
+sshpass -p '<BOARD_PASSWORD>' scp -r -o StrictHostKeyChecking=no \
+  package/ <BOARD_USER>@<BOARD_IP>:~/magnetar-package/
+```
+
+记录推送结果到 `task.md`。
+
+#### 2. 按 README 路径 A 验证：直接用 AXMODEL 推理
+
+严格按照 `package/README.md` 中"路径 A：直接用已编译的 AXMODEL 推理"的步骤：
+
+1. **Python 环境安装**：按 `package/python/README.md` 从零安装 Python 依赖（pip install、pyaxengine 安装等），记录每个命令的退出码和输出。
+2. **Python 推理**：按 README 中的示例命令运行 Python 推理，验证输出格式和结果。
+3. **C++ 构建**（若 SDK_LANG 含 cpp）：
+   - 按 `package/cpp/README.md` 在主机完成交叉编译（cmake configure + make）。
+   - 将编译产物推送到板端。
+   - 按 README 中的运行命令执行 C++ 推理。
+4. **结果验证**：对比 Python/C++ 输出与预期值（shape、dtype、cosine、MAE），记录到 `analysis.md`。
+
+#### 3. 按 README 路径 B 验证：从零复现模型转换
+
+严格按照 `package/model_convert/README.md` 的步骤：
+
+1. **环境准备**：按 README 安装 Python 依赖（`pip install -r requirements.txt`），检查 Docker/Pulsar2 环境。
+2. **ONNX 导出**：执行 `python export_onnx.py ...`，验证产出 `model.onnx`。
+3. **Pulsar2 编译**：执行 `./compile_pulsar2.sh` 或 README 中的完整 `pulsar2 build` 命令，验证产出 `model.axmodel`。
+4. **产物检查**：按 README 中的产物检查表确认文件存在且大小合理。
+
+#### 4. 问题发现与即时修正
+
+每遇到一个步骤失败，执行以下循环：
+
+1. **诊断**：分析失败原因（依赖缺失、路径错误、权限问题、配置不对等），记录到 `analysis.md`。
+2. **修正**：在 `package/` 内就地修正：
+   - README 命令错误 → 修正命令
+   - 依赖缺失 → 补充 `requirements.txt`
+   - 路径不对 → 修正 README 或脚本中的路径
+   - 配置错误 → 修正 `pulsar2_config.json` 或 `CMakeLists.txt`
+   - 脚本 bug → 修正脚本
+3. **重试**：重新执行当前步骤和后续步骤。
+4. **记录**：每次修正后更新 `task.md`，描述问题、根因、修正内容、重试结果。
+
+#### 5. 最终验证清单
+
+板端自验证通过后，确认以下清单全部满足：
+
+- [ ] `package/README.md` 路径 A 所有命令可无障碍执行，Python 推理输出正确
+- [ ] `package/README.md` 路径 A 的 C++ 构建和运行命令可无障碍执行（若 SDK_LANG 含 cpp）
+- [ ] `package/model_convert/README.md` 所有命令可无障碍执行，从零完成 ONNX 导出和 AXMODEL 编译
+- [ ] 所有 README 中无占位符、无省略号、无 `<path>` 等未填内容
+- [ ] 所有 `requirements.txt` 完整覆盖所需依赖
+- [ ] `compile_pulsar2.sh` 可直接执行，无变量间接引用
+- [ ] `package/` 内无私有凭据、缓存、虚拟环境、中间文件
+
+### 与 RUNONBOARD 的关系
+
+- `RUNONBOARD` 阶段验证模型在板端的功能正确性和性能（精度、延迟、内存），使用的是 TASK_DIR 内的 SDK 示例。
+- `PACKAGE` 板端自验证验证的是交付包的可复现性和文档完备性，以"客户视角"执行 README。
+- 两者互补：RUNONBOARD 确保模型能跑，PACKAGE 板端自验证确保客户能独立跑通。
+
+### STOP
+
+- 板端自验证发现的问题修正后仍反复失败超过 3 轮，STOP 并报告未解决的问题和根因分析。
+- 板端缺少必要运行时（如 `pyaxengine`、AX runtime 库）且无法自动安装，STOP 并说明缺失项。
