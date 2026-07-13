@@ -7,6 +7,48 @@ description: Hidden stage for magnetar. Assemble validated AXMODEL, SDKs, report
 
 目标：形成一份客户拿到后能从零复现模型转换并运行 Python/C++ SDK 的交付包。所有说明文档必须详尽到新人按步骤操作即可完成，包括环境安装、工具使用方法、每步预期产物。
 
+## 分发策略：GitHub vs HuggingFace
+
+PACKAGE 产物需同时推送 GitHub 和 HuggingFace，但内容不同：
+
+### GitHub（源码 + 可复现）
+
+| 目录 | 内容 |
+|------|------|
+| `models/` | model.axmodel + model_meta.json |
+| `cpp/` | 源码 + CMakeLists.txt（FetchContent libdet.axera）+ toolchain-aarch64.cmake |
+| `python/` | Python SDK 源码 |
+| `model_convert/` | ONNX 导出脚本、Pulsar2 配置、校准数据、编译脚本 |
+| `reports/` | 各阶段报告 |
+| `demo/` | 测试图片 |
+
+> GitHub 不含编译产物（bin/ lib/ include/），这些通过 GitHub Release 分发。
+
+### HuggingFace（开箱即用）
+
+| 目录 | 内容 |
+|------|------|
+| `models/` | model.axmodel + model_meta.json |
+| `cpp/bin/` | visdrone_detect（预编译 aarch64） |
+| `cpp/lib/` | libdet.so（预编译 aarch64） |
+| `cpp/include/` | 头文件 |
+| `python/` | Python SDK 源码 |
+| `demo/` | 测试图片 |
+
+> HF **不含** `model_convert/`、C++ 源码、CMake 文件、`reports/`。客户只关心使用，不关心转换。
+
+### GitHub Release
+
+预编译 aarch64 二进制通过 Release assets 发布：model.axmodel + libdet.so + visdrone_detect。
+
+### HF README 格式
+
+HF README 必须以 YAML frontmatter 开头，含 `language`、`license`、`tags`、`datasets`、`library_name`、`pipeline_tag`。
+
+### README 策略
+
+- GitHub 和 HF 均只保留顶层 `README.md`，删除 `cpp/README.md`、`python/README.md` 等子目录 README
+
 ## 步骤
 
 1. 清空并重建 `package/`。
@@ -17,7 +59,11 @@ description: Hidden stage for magnetar. Assemble validated AXMODEL, SDKs, report
    - `sdk/cpp/` -> `package/cpp/`
    - ONNX 导出脚本、ONNX 产物、Pulsar2 配置、编译命令说明 -> `package/model_convert/`
    - 阶段报告 -> `package/reports/`
-3. 生成 `package/reports/performance_report.md`，汇总所有阶段采集的性能数据。从各阶段报告中提取：
+3. **YOLO 模型额外步骤**：若当前模型为 YOLO 系列（按 sdk-gen 阶段判定规则），执行以下操作：
+   - 确保 `package/python/<model>_sdk/` 已包含 `pydet/` 子目录（从 sdk-gen 阶段复制）
+   - 确保 `package/cpp/CMakeLists.txt` 已包含 libdet.axera 的 FetchContent 或 add_subdirectory 集成
+   - 在 `package/README.md` 中增加 libdet.axera 的获取和编译说明
+4. 生成 `package/reports/performance_report.md`，汇总所有阶段采集的性能数据。从各阶段报告中提取：
    - **流水线耗时**：从 `task.md` 提取各阶段耗时，计算端到端总耗时。
    - **模型效率**：从 `compile_report.md` 提取 ONNX 大小、AXMODEL 大小、压缩比、MACs。若已知芯片理论算力，计算 MACs 利用率。
    - **推理延迟**：从 `simulate_report.md` 提取仿真延迟；从 `runonboard_report.md` 提取板端 Python/C++ 延迟。
@@ -65,8 +111,8 @@ description: Hidden stage for magnetar. Assemble validated AXMODEL, SDKs, report
    | MAE | X.XXX ± X.XXX |
    | max abs diff | X.XXX ± X.XXX |
    ```
-4. 生成 `package/README.md`（详见下方 [顶层 README.md](#顶层-readmemd)）。
-5. 生成项目级辅助文件：
+5. 生成 `package/README.md`（详见下方 [顶层 README.md](#顶层-readmemd)）。
+6. 生成项目级辅助文件：
    - `.gitignore`: 忽略 Python 缓存、CMake build、临时输出文件。
    - 可选 `manifest.json`: 列出文件 SHA256、版本、时间戳。
 
@@ -81,21 +127,24 @@ package/
     model_meta.json    # 模型元信息（输入/输出 tensor 定义）
   python/
     README.md          # Python SDK 使用说明（含环境安装、API 文档）
-    requirements.txt
     <model>_sdk/
       __init__.py
       inference.py
       preprocess.py
       postprocess.py
-      example.py
-      requirements.txt
+      pydet/            # YOLO 模型专属：libdet.axera Python 绑定
+        __init__.py
+        pydet.py
+        pyaxdev.py
   cpp/
-    README.md          # C++ SDK 构建说明（含本地/交叉编译、运行方法）
-    CMakeLists.txt
-    toolchain-aarch64.cmake
+    README.md          # C++ SDK 使用说明（含 API 和运行方法）
+    bin/
+      visdrone_detect  # 预编译 aarch64 可执行程序（开箱即用）
     include/
-    src/
-    examples/
+      libdet.h         # C API 头文件
+      ax_devices.h     # 设备枚举头文件
+    lib/
+      libdet.so        # 预编译 aarch64 共享库（OpenCV 静态链接）
   model_convert/
     README.md          # 从零复现模型转换的完整说明
     requirements.txt   # 复现所需的 Python 依赖
@@ -129,6 +178,9 @@ package/
 - 环境安装：
   - Python SDK：安装 `pyaxengine` 的方法（pip 安装或源码安装，给出完整 URL）。
   - C++ SDK：列出编译器、CMake、AX runtime 的获取和安装步骤。
+  - **YOLO 模型额外依赖**：
+    - Python: 编译 `libdet.so`（从 https://github.com/AXERA-TECH/libdet.axera.git 获取源码，`./build.sh` 编译，将 `libdet.so` 放入 LD_LIBRARY_PATH）
+    - C++: `libopencv-dev`，libdet.axera 源码编译
 - 运行示例：
   - Python：完整的 `pip install -r requirements.txt` + `python example.py <image>` 命令。
   - C++：完整的 `mkdir build && cd build && cmake .. && make` 和运行命令。
@@ -159,9 +211,14 @@ package/
 2. **安装步骤**：
    ```
    pip install -r requirements.txt
-   pip install -r <model>_sdk/requirements.txt
    ```
    若 `pyaxengine` 需要从源码安装，给出完整的 `git clone` + `pip install` 命令。
+   **YOLO 模型额外步骤**：
+   ```
+   git clone https://github.com/AXERA-TECH/libdet.axera.git
+   cd libdet.axera && ./build.sh
+   export LD_LIBRARY_PATH=$(pwd)/build/lib:${LD_LIBRARY_PATH}
+   ```
 3. **快速运行**：完整命令行示例，含输入文件格式要求。
 4. **API 说明**：SDK 类的初始化参数、推理方法签名、返回值结构。
 5. **输入预处理说明**：resize 策略、归一化参数、颜色通道顺序。
@@ -172,25 +229,14 @@ package/
 
 `package/cpp/README.md` 必须包含：
 
-1. **环境要求**：
-   - 本机构建：CMake 版本、C++ 编译器（gcc/clang）。
-   - 交叉编译：芯片对应 BSP SDK 的下载地址和安装方法，给出完整 URL。（AX650: AX650 BSP SDK V3.10.2，AX620E: Arm GNU 工具链）。
-   - AX runtime：头文件和库文件的获取路径，说明如何设置 `AX_RUNTIME_ROOT`。
-2. **构建步骤**：
-   - 本机构建（仅验证编译，不能运行推理）：
-     ```
-     mkdir build && cd build
-     cmake .. -DCMAKE_BUILD_TYPE=Release
-     make -j$(nproc)
-     ```
-   - 交叉编译（产物可上板运行，需先安装 BSP/工具链）：
-     ```
-     mkdir build_arm && cd build_arm
-     cmake .. -DCMAKE_TOOLCHAIN_FILE=../toolchain-aarch64.cmake -DCMAKE_BUILD_TYPE=Release
-     make -j$(nproc)
-     ```
-3. **上板运行**：如何将编译产物传到板端、设置 `LD_LIBRARY_PATH`、运行示例。
-4. **API 说明**：类的构造、初始化、推理方法、输入输出数据格式。
+1. **文件说明**：列出 bin/、lib/、include/ 目录的文件和用途。
+2. **运行依赖**：列出板端运行时库（`/soc/lib/libax_engine.so`、`/soc/lib/libax_sys.so`）。
+3. **用法**：
+   - 直接运行预编译程序：完整的命令行示例。
+   - 集成到自己的项目：包含 `#include "libdet.h"`、API 调用示例、编译命令。
+4. **编译（如需）**：指向 GitHub 仓库源码链接和交叉编译依赖。
+   - 交叉编译器 + BSP SDK 版本说明。
+5. **API 说明**：`ax_det_init_t` 结构体字段、`ax_det()/ax_det_init()/ax_det_deinit()` 函数签名。
 
 ---
 
@@ -198,7 +244,6 @@ package/
 
 目标：客户拿到 `model_convert/` 后，只需安装 Python 依赖 + Pulsar2 环境即可从零复现 ONNX 导出到 AXMODEL 编译的完整流程。
 
-### requirements.txt
 
 必须包含从零复现所需的所有 Python 包，按类别分组注释。不能省略任何依赖：
 
@@ -217,12 +262,11 @@ numpy
 Pillow
 ```
 
-若某依赖无 pip 包（如 Pulsar2 只能通过 Docker 使用），在 requirements.txt 中以注释形式给出获取方式，并在 README 中详细说明环境搭建步骤。
 
 ### compile_pulsar2.sh
 
 必须是一份可直接执行的完整编译脚本，包含：
-- Pulsar2 环境激活（如 `source /path/to/pulsar2_env/bin/activate`）或 Docker run 命令。
+- Pulsar2 镜像检查（`docker images | grep pulsar2`），不存在时提示从 HuggingFace 下载并 `docker load`。
 - 完整的 `pulsar2 build` 命令及其所有参数。不得使用变量间接引用（除非在脚本开头明确赋值）。
 - 产物路径说明（编译后输出到哪个目录）。
 - 异常处理：编译失败时的诊断建议（如检查磁盘空间、Docker 是否运行）。
@@ -249,14 +293,12 @@ Pillow
   ```
   python3 -m venv venv
   source venv/bin/activate
-  pip install -r requirements.txt
   ```
 - **Pulsar2 环境**：
-  - Docker 镜像地址（完整 URL，含 tag）。
-  - Docker pull 命令。
-  - Docker 运行方式说明（挂载目录、端口等）。
-  - 若不用 Docker，说明本地安装步骤。
-- 验证环境：列出检查命令（`python --version`、`docker --version`、`pip list | grep onnx`）。
+  - 从 HuggingFace 下载 Docker 镜像 tar.gz（完整 URL，如 `https://hf-mirror.com/AXERA-TECH/Pulsar2/resolve/main/6.0/ax_pulsar2_6.0.tar.gz`）。
+  - 用 `docker load < ax_pulsar2_6.0.tar.gz` 导入镜像。
+  - Docker 运行方式说明（挂载目录等）。
+- 验证环境：列出检查命令（`python --version`、`docker --version`、`docker images | grep pulsar2`、`pip list | grep onnx`）。
 
 #### 3. ONNX 导出（标题含具体模型名，如 YOLOv8-seg）
 - 说明输入权重文件是什么、从哪里获取。
@@ -297,18 +339,21 @@ Pillow
 - 不得在 README 或脚本中使用占位符或省略号（如 `...`、`--xxx`、`<path>`、`<fill me>`）。
 - 不得省略 `pulsar2 build` 的完整参数列表。
 - 不得遗漏校准数据来源说明。
-- 不得遗漏 `requirements.txt`。
 - 不得遗漏环境安装步骤（认为客户已装好所有工具）。
 
 ## 验证
 
-- 必需文件齐全：`model_convert/requirements.txt`、`model_convert/compile_pulsar2.sh`、`model_convert/export_onnx.py`。
 - 所有 README 中的命令完整无省略、可直接复制执行。
 - 环境安装说明覆盖 Python、Pulsar2（Docker）、芯片 BSP/交叉编译工具链。
 - `package/reports/performance_report.md` 存在且各节内容完整（缺失数据标 N/A）。
 - `package/` 可作为项目根目录阅读和构建，客户不需要理解 `TASK_DIR` 内部结构。
 - README 不依赖内部临时路径才能理解。
 - `package/` 中不包含原始私有凭据、缓存、虚拟环境、node_modules 或大型无关中间文件。
+- **YOLO 模型额外检查**：
+  - `package/python/<model>_sdk/pydet/` 目录存在且包含 `pydet.py`、`pyaxdev.py`、`__init__.py`
+  - `package/cpp/CMakeLists.txt` 包含 libdet.axera 的 FetchContent 或 add_subdirectory 集成
+  - `package/README.md` 和 `package/python/README.md` 中包含 libdet.axera 克隆和编译步骤
+  - `package/cpp/README.md` 中包含 libdet.axera 依赖说明和 OpenCV 安装步骤
 
 ## 板端自验证
 
@@ -339,9 +384,11 @@ sshpass -p '<BOARD_PASSWORD>' scp -r -o StrictHostKeyChecking=no \
 严格按照 `package/README.md` 中"路径 A：直接用已编译的 AXMODEL 推理"的步骤：
 
 1. **Python 环境安装**：按 `package/python/README.md` 从零安装 Python 依赖（pip install、pyaxengine 安装等），记录每个命令的退出码和输出。
+   - **YOLO 模型**：额外执行 libdet.axera 克隆和编译步骤，验证 `libdet.so` 生成且可被 Python ctypes 加载。
 2. **Python 推理**：按 README 中的示例命令运行 Python 推理，验证输出格式和结果。
 3. **C++ 构建**（若 SDK_LANG 含 cpp）：
    - 按 `package/cpp/README.md` 在主机完成交叉编译（cmake configure + make）。
+   - **YOLO 模型**：确认 CMake 成功拉取或找到 libdet.axera 源码并完成链接。
    - 将编译产物推送到板端。
    - 按 README 中的运行命令执行 C++ 推理。
 4. **结果验证**：对比 Python/C++ 输出与预期值（shape、dtype、cosine、MAE），记录到 `analysis.md`。
@@ -380,6 +427,7 @@ sshpass -p '<BOARD_PASSWORD>' scp -r -o StrictHostKeyChecking=no \
 - [ ] 所有 `requirements.txt` 完整覆盖所需依赖
 - [ ] `compile_pulsar2.sh` 可直接执行，无变量间接引用
 - [ ] `package/` 内无私有凭据、缓存、虚拟环境、中间文件
+- [ ] **YOLO 模型额外检查**：`libdet.so` 成功编译并可被 SDK 加载，推理后处理输出正确的检测框/关键点
 
 ### 与 RUNONBOARD 的关系
 
@@ -391,3 +439,4 @@ sshpass -p '<BOARD_PASSWORD>' scp -r -o StrictHostKeyChecking=no \
 
 - 板端自验证发现的问题修正后仍反复失败超过 3 轮，STOP 并报告未解决的问题和根因分析。
 - 板端缺少必要运行时（如 `pyaxengine`、AX runtime 库）且无法自动安装，STOP 并说明缺失项。
+- **YOLO 模型**：若板端无法编译 libdet.axera（缺少 OpenCV 或其他依赖），STOP 并说明缺失项和安装方法建议。

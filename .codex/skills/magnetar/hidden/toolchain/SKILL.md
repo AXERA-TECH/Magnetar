@@ -66,6 +66,25 @@ https://hf-mirror.com/AXERA-TECH/AX650-Community-Hub/tree/main/sdk/edge-computin
 
 ## 验证
 
+## 板端 Runtime 检测
+
+进入 TOOLCHAIN 后，必须通过 SSH 检测板端 runtime 类型，决定后续 SDK 和 RUNONBOARD 阶段使用的库和 API：
+
+```bash
+sshpass -p '<BOARD_PASSWORD>' ssh -o StrictHostKeyChecking=no <BOARD_USER>@<BOARD_IP> "which axcl_run_model"
+```
+
+- 若命令成功（exit code 0）-> `AX_RUNTIME_TYPE=axcl`。使用 AXCL runtime：
+  - 头文件路径: `<axcl_extracted>/include/external/`
+  - 库文件: `libaxcl_rt.so`, `libaxcl_sys.so` 等（位于 `<axcl_extracted>/out/axcl_linux_ax650/lib/`）
+  - SDK 中 C++ API 使用 `axcl` 命名空间，通过 `axcl.h` 引入
+- 若命令失败（exit code != 0）-> `AX_RUNTIME_TYPE=axengine`。使用 axengine runtime：
+  - 头文件路径: 需从板端 `/soc/lib/` 获取（默认路径）；若不存在则从 BSP 中获取
+  - 库文件: `libax_engine.so`, `libax_sys.so`
+  - SDK 中 C++ API 使用 axengine 命名空间
+
+将检测结果和 `AX_RUNTIME_TYPE` 记录到 `task.md` 和 `analysis.md`。
+
 - Pulsar2 可用（可执行 `pulsar2` 或 `docker run` 成功）。
 - 若 TARGET_HARDWARE=AX650：BSP 已下载并解压，`CXX_COMPILER_PATH` 和 `AX_RUNTIME_ROOT` 已定位。
 - 若 TARGET_HARDWARE=AX620E：交叉编译器可用或已下载。

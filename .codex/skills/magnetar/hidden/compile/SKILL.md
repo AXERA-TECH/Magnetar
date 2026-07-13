@@ -7,6 +7,29 @@ description: Hidden stage for magnetar. Compile static ONNX to AXMODEL with Puls
 
 目标：用 Pulsar2 把 `export/model.onnx` 编译为 `compile/model.axmodel`，并采集编译效率指标。
 
+## 校准归一化对齐（关键）
+
+Pulsar2 校准的归一化公式为 `(image - calibration_mean) / calibration_std`，而 libdet.axera 推理预处理使用 `(input - mean) * std`。两者公式不同，必须反向对齐才能让模型收到正确范围的输入。
+
+### ONNX 模型期望 [0,1] 输入（默认情况）
+
+大多数 PyTorch 训练的模型期望 [0,1] 浮点输入：
+
+| 组件 | 配置 | 输入范围 |
+|------|------|----------|
+| Pulsar2 校准 | `calibration_std = 255` | uint8 / 255 = [0,1] |
+| libdet 推理 | `std = 1/255` | uint8 × (1/255) = [0,1] |
+
+**常见错误**：把 `calibration_std` 设为 `0.004`（即 1/255），Pulsar2 执行 uint8/0.004 = [0,65025]，量化模型被校准到错误范围，推理时输出全零或全饱和。
+
+### 校验方法
+
+编译前用实际校准图跑 ONNX Runtime，分别输入 [0,1] 和 [0,255]，对比输出 cosine。若 < 0.99，模型对输入范围敏感，必须确保校准归一化匹配 ONNX 期望范围。
+
+### 量化位宽
+
+默认 INT8。U16 仅在 INT8 仿真 cosine < 0.99 或板端检测结果异常时尝试，且必须经板端验证确认改善后采用。
+
 ## 入口检查
 
 进入 COMPILE 前必须确认 `export/model.onnx` 已为静态 shape。Pulsar2 不接受动态维度——`input_shapes` 配置无法覆盖 ONNX 图中定义的动态维度名。若模型仍含动态维度，必须退回 EXPORT 阶段完成静态化。

@@ -39,6 +39,32 @@ description: Convert remote or local AI models into AXera AXMODEL packages with 
   - AX650: `https://hf-mirror.com/AXERA-TECH/AX650-Community-Hub/resolve/main/sdk/edge-computing-AX650_SDK_V3.10.2/02.%20SDK/AX650_SDK_V3.10.2/AX650_SDK_V3.10.2_20260513151335.tgz`
   - AX620E: `https://developer.arm.com/-/media/Files/downloads/gnu-a/9.2-2019.12/binrel/gcc-arm-9.2-2019.12-x86_64-aarch64-none-linux-gnu.tar.xz`（待更新为BSP）
 
+
+## 关键校准对齐规则
+
+Pulsar2 校准与 libdet 推理的归一化公式不同：
+
+| 组件 | 公式 |
+|------|------|
+| Pulsar2 校准 | `(img - mean) / calibration_std` |
+| libdet.axera | `(input - mean) * std` |
+
+ONNX 模型默认期望 [0,1] 输入时：
+- Pulsar2 `calibration_std` = **255**（uint8/255=[0,1]）
+- libdet `std` = **1/255**（uint8×(1/255)=[0,1]）
+
+> 常见错误：`calibration_std=0.004` 导致校准输入 [0,65025]，推理输出全零。
+
+## 分发策略
+
+| 平台 | 内容 | 用途 |
+|------|------|------|
+| GitHub | 源码 + CMake + model_convert | 从零构建复现 |
+| GitHub Release | 预编译 bin/lib | 直接下载 |
+| HuggingFace | 预编译模型 + 仅 binaries | 开箱即用推理 |
+
+HF 不含 model_convert/ 和 C++ 源码；HF README 需 YAML frontmatter。
+
 ## 输出
 
 最终交付目录为 `TASK_DIR/package/`，必须是一份客户拿到后能从零复现模型转换并运行 Python/C++ SDK 的完整交付包：
@@ -129,6 +155,9 @@ package/
 - `package/` 满足客户从零复现的全部要求，并通过板端自验证：
   - `package/README.md` 详尽覆盖模型概述、快速开始（推理/复现两条路径）、目录说明、性能摘要、已知限制。
   - `package/model_convert/` 包含 `requirements.txt`、`export_onnx.py`、`compile_pulsar2.sh`、完整 pulsar2 配置和 README，客户可按步骤从 ONNX 导出到 AXMODEL 编译。
+- 各阶段在需要引用 AX runtime 库时，统一使用 `AX_RUNTIME_TYPE` 决策，该变量由 TOOLCHAIN 阶段检测板端 runtime 后设置：
+  - `axcl`: 板端有 `axcl_run_model` 时使用。链接 `libaxcl_rt.so` 等 AXCL 库，头文件在 `axcl/include/external/`。
+  - `axengine`: 板端无 `axcl_run_model` 时使用。链接 `libax_engine.so`/`libax_sys.so`，使用 axengine API。
   - `package/model_convert/README.md` 覆盖环境准备（Python、Docker、Pulsar2）、ONNX 导出、校准数据、编译命令（完整无省略）、产物检查、常见问题。
   - `package/python/README.md` 覆盖环境安装、运行示例、API 说明。
   - `package/cpp/README.md` 覆盖本机构建、BSP 安装和交叉编译、上板运行、API 说明。

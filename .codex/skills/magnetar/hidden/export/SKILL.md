@@ -43,7 +43,7 @@ Pulsar2 仅支持静态 shape 的 ONNX。所有输入维度必须为具体整数
 - `model_meta.json`，字段：
   - `model_name`
   - `framework`
-  - `inputs`: name、shape、dtype、layout、preprocess
+  - `inputs`: name、shape、dtype、layout、preprocess（必须明确 ONNX 期望输入数值范围，如 [0,1] 或 [0,255]，这是 COMPILE 阶段确定 calibration_std 的依据）
   - `outputs`: name、shape、dtype、semantic
   - `opset`
   - `onnx_size_bytes`: ONNX 文件字节数（用于后续压缩比计算）。
@@ -52,6 +52,13 @@ Pulsar2 仅支持静态 shape 的 ONNX。所有输入维度必须为具体整数
 - `export_report.md`。
 
 - 记录 ONNX 文件大小（字节）到 `model_meta.json` 的 `onnx_size_bytes` 和 `export_report.md`。
+
+
+## 输入范围确认
+
+必须确认 ONNX 模型期望的输入数值范围（大多数 PyTorch 模型为 [0,1]），记录到 `model_meta.json` 的 preprocess 字段。这是 COMPILE 阶段确定 `calibration_std` 的关键依据。
+
+验证方法：分别用 [0,1] 和 [0,255] 范围的随机输入跑 ONNX，对比两者输出 cosine。若 < 0.99，模型对输入范围敏感，必须明确文档化。
 
 ## 验证
 
