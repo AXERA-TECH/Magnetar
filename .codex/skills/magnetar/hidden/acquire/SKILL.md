@@ -12,7 +12,7 @@ description: Hidden stage for magnetar. Acquire a remote or local model into TAS
 1. 创建 `TASK_DIR/cache/acquire/`，记录来源、时间、命令。
 2. 按来源类型处理：
    - Git: `git clone --depth=1 SOURCE TASK_DIR/origin`
-   - HuggingFace: 设置 `HF_ENDPOINT=https://hf-mirror.co`，用 `huggingface_hub.snapshot_download()` 下载到 `origin/`，私有模型读取 `HF_TOKEN`
+   - HuggingFace: 设置 `HF_ENDPOINT=https://hf-mirror.com`，用 `huggingface_hub.snapshot_download()` 下载到 `origin/`，私有模型读取 `HF_TOKEN`
    - HTTP/HTTPS 文件: 下载到 `origin/`
    - 本地目录: 复制目录内容到 `origin/`
    - 本地文件: 复制到 `origin/`
@@ -31,7 +31,7 @@ description: Hidden stage for magnetar. Acquire a remote or local model into TAS
    - `model_file_candidates`
    - `export_script_candidates`
    - `readme_files`
-   - `hf_endpoint`（仅 HuggingFace 来源，必须为 `https://hf-mirror.co`）
+   - `hf_endpoint`（仅 HuggingFace 来源，必须为 `https://hf-mirror.com`）
 
 ## 下载约束
 

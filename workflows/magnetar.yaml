@@ -16,8 +16,8 @@ workflow:
       cost_budget: no paid external actions without user approval
       technology:
       - Pulsar2 for ONNX to AXMODEL compilation
-      - Pulsar2 Docker image fallback from https://hf-mirror.co/AXERA-TECH/Pulsar2/tree/main
-      - HuggingFace downloads must use hf-mirror with HF_ENDPOINT=https://hf-mirror.co
+      - Pulsar2 Docker image fallback from https://hf-mirror.com/AXERA-TECH/Pulsar2/tree/main
+      - HuggingFace downloads must use hf-mirror with HF_ENDPOINT=https://hf-mirror.com
       - Python virtual environments must be managed with uv
       - ONNX static shape
       - onnxruntime for ONNX validation
@@ -180,7 +180,7 @@ workflow:
     required: false
     source: environment
     validation:
-    - must be https://hf-mirror.co for HuggingFace downloads
+    - must be https://hf-mirror.com for HuggingFace downloads
   - id: uv
     type: executable
     required: false
@@ -204,7 +204,7 @@ workflow:
     required: false
     source: external
     validation:
-    - defaults to https://hf-mirror.co/AXERA-TECH/Pulsar2/tree/main when local Pulsar2 is unavailable
+    - defaults to https://hf-mirror.com/AXERA-TECH/Pulsar2/tree/main when local Pulsar2 is unavailable
   - id: BOARD
     type: text
     required: true
