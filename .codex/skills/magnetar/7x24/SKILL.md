@@ -25,7 +25,7 @@ DISCOVER → FILTER → [ALLOCATE → MAGNETAR 9-STAGE → PUBLISH] × N
 2. **FILTER**: 读取 [hidden/filter/SKILL.md](hidden/filter/SKILL.md)，排除 LLM（text-generation/conversational），去重已有记录。
 3. **ALLOCATE**: 读取 [hidden/allocate/SKILL.md](hidden/allocate/SKILL.md)，从 dashboard 分配空闲 AX 板。
 4. 对每个模型并行执行标准 Magnetar 9 阶段（ACQUIRE→PACKAGE）。
-5. **PUBLISH**: 读取 [hidden/publish/SKILL.md](hidden/publish/SKILL.md)，板端验证通过后推送 HF + GitHub。
+5. **PUBLISH**: 读取 [hidden/publish/SKILL.md](hidden/publish/SKILL.md)，板端验证通过后生成 SDK+model_convert 并推送 HF + GitHub。
 6. 更新队列和日志，等待下一轮。
 
 ## STOP 点
