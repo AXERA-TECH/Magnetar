@@ -1,0 +1,105 @@
+workflow:
+  schema_version: "1.0"
+  name: magnetar-7x24
+  entry_skill: ".codex/skills/magnetar/7x24/SKILL.md"
+  mode: guided
+  task_type: iterative
+
+  requirement:
+    goal: "7x24 autonomous model discovery, conversion, and publish"
+    output:
+      format: "HF repo + GitHub repo per model"
+      destination: "AXERA-TECH/<model> (HF), ml-inory/<model>.axera (GitHub)"
+      consumer: both
+    assumptions:
+      - "HF/GitHub credentials available"
+      - "Board dashboard accessible"
+      - "Models filtered: no text-generation or conversational"
+
+  capabilities:
+    - id: magnetar
+      purpose: "Standard 9-stage conversion pipeline"
+      source: existing
+      skill_path: ".codex/skills/magnetar/SKILL.md"
+    - id: discover
+      purpose: "HF/GitHub trending model discovery"
+      source: generate
+      skill_path: ".codex/skills/magnetar/7x24/hidden/discover/SKILL.md"
+    - id: filter
+      purpose: "Task type filter and risk assessment"
+      source: generate
+      skill_path: ".codex/skills/magnetar/7x24/hidden/filter/SKILL.md"
+    - id: allocate
+      purpose: "Board allocation from dashboard"
+      source: generate
+      skill_path: ".codex/skills/magnetar/7x24/hidden/allocate/SKILL.md"
+    - id: publish
+      purpose: "Publish to HF and GitHub"
+      source: generate
+      skill_path: ".codex/skills/magnetar/7x24/hidden/publish/SKILL.md"
+
+  steps:
+    - id: discover
+      kind: agent
+      skill: "7x24/hidden/discover"
+      description: "Fetch trending models from HF and GitHub"
+      retry: { max_attempts: 2, backoff: exponential }
+
+    - id: filter
+      kind: agent
+      skill: "7x24/hidden/filter"
+      description: "Filter out LLMs, tag by confidence"
+      depends_on: [discover]
+
+    - id: allocate
+      kind: agent
+      skill: "7x24/hidden/allocate"
+      description: "Assign idle AX boards from dashboard"
+      depends_on: [filter]
+      on_failure: { action: ask_user }
+
+    - id: convert
+      kind: agent
+      skill: "magnetar"
+      description: "Run 9-stage pipeline per model"
+      depends_on: [allocate]
+      timeout_seconds: 7200
+      retry: { max_attempts: 1 }
+      on_failure: { action: degrade }
+
+    - id: validate
+      kind: gate
+      description: "Check SIMULATE >= 0.99 and board OK"
+      depends_on: [convert]
+      pass_when: ["cosine >= 0.99", "board passed"]
+      on_pass: publish
+      on_fail: log_fail
+
+    - id: publish
+      kind: agent
+      skill: "7x24/hidden/publish"
+      description: "Push to HF (binary) + GitHub (source)"
+      depends_on: [validate]
+      retry: { max_attempts: 3, backoff: exponential }
+
+    - id: log_fail
+      kind: script
+      description: "Record failed model"
+      depends_on: [validate]
+
+    - id: report
+      kind: synthesis
+      description: "Write cycle summary"
+      depends_on: [publish, log_fail]
+
+  failure_policy:
+    default_action: log_and_skip
+    max_total_attempts: 3
+
+  observability:
+    progress_updates: milestone
+    audit_log: { enabled: true }
+
+  completion:
+    success_when: ["cycle report written"]
+    failure_when: ["3 consecutive model failures"]
