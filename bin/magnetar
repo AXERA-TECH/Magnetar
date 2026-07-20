@@ -24,6 +24,8 @@ magnetar — AI 模型到 AX 芯片一键部署 CLI
   init       在当前项目创建 .magnetarrc 配置文件
   check      检查环境依赖和配置完整性
   status     查看最近一次任务的状态
+  monitor    实时 TUI 监控面板，展示流水线进度和关键指标
+  report     生成自包含 HTML 仪表盘报告
   run        输出 Codex 启动提示，开始模型部署
   dry-run    预览模式：扫描模型、输出计划，不执行实际转换
   install    安装 Pulsar2 Docker 编译环境
@@ -34,7 +36,8 @@ magnetar — AI 模型到 AX 芯片一键部署 CLI
   ./magnetar init         # 初始化配置
   ./magnetar check        # 检查环境
   ./magnetar run          # 启动完整部署
-  ./magnetar dry-run      # 仅预览计划
+  ./magnetar monitor      # 实时监控流水线
+  ./magnetar report       # 生成 HTML 报告
 EOF
 }
 
@@ -213,11 +216,50 @@ cmd_install() {
     fi
 }
 
+cmd_monitor() {
+    local task_dir="${1:-}"
+    if [[ -z "$task_dir" ]]; then
+        if [[ -d "$PROJECT_ROOT/todos/work" ]]; then
+            task_dir=$(ls -1dt "$PROJECT_ROOT/todos/work"/*/ 2>/dev/null | head -1)
+            task_dir="${task_dir%/}"
+        fi
+    fi
+    if [[ -z "$task_dir" ]] || [[ ! -d "$task_dir" ]]; then
+        echo -e "${YELLOW}未找到任务目录。用法: ./magnetar monitor <TASK_DIR>${NC}"
+        return 1
+    fi
+    echo -e "${CYAN}监控任务: $task_dir${NC}"
+    echo "按 Ctrl+C 退出"
+    sleep 1
+    exec python3 "$REPO_ROOT/scripts/monitor.py" "$task_dir"
+}
+
+cmd_report() {
+    local task_dir="${1:-}"
+    if [[ -z "$task_dir" ]]; then
+        if [[ -d "$PROJECT_ROOT/todos/work" ]]; then
+            task_dir=$(ls -1dt "$PROJECT_ROOT/todos/work"/*/ 2>/dev/null | head -1)
+            task_dir="${task_dir%/}"
+        fi
+    fi
+    if [[ -z "$task_dir" ]] || [[ ! -d "$task_dir" ]]; then
+        echo -e "${YELLOW}未找到任务目录。用法: ./magnetar report <TASK_DIR>${NC}"
+        return 1
+    fi
+    local output="${task_dir}/dashboard.html"
+    python3 "$REPO_ROOT/scripts/generate_report.py" "${task_dir%/}" -o "$output"
+    echo ""
+    echo -e "${GREEN}报告已生成:${NC} $output"
+    echo "可直接用浏览器打开"
+}
+
 cmd="${1:-help}"
 case "$cmd" in
     init)       cmd_init ;;
     check)      cmd_check ;;
     status)     cmd_status ;;
+    monitor)    shift; cmd_monitor "$@" ;;
+    report)     shift; cmd_report "$@" ;;
     run)        cmd_run ;;
     dry-run)    cmd_dry_run ;;
     install)    cmd_install ;;
