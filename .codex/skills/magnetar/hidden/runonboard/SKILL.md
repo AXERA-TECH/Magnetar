@@ -9,7 +9,22 @@ description: Hidden stage for magnetar. Optionally deploy AXMODEL and SDK exampl
 
 ## 执行条件
 
-必须执行。未提供 `BOARD` 时暂停并等待用户提供板端信息。
+`BOARD` 为可选参数。行为如下：
+
+- **提供了 BOARD**：正常执行板端验证，产出完整报告。
+- **未提供 BOARD**：自动跳过本阶段，生成 `runonboard_report.md` 并将所有指标标注为 N/A。在 `task.md` 中记录跳过原因。
+
+跳过时仍需产出的最小报告：
+
+```markdown
+# RUNONBOARD Report (skipped)
+
+- 状态: N/A — 未提供 BOARD 参数
+- Python SDK 延迟: N/A
+- C++ SDK 延迟: N/A
+- 系统内存增量: N/A
+- CMM 占用: N/A
+```
 
 ## 步骤
 

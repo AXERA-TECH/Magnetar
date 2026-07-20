@@ -8,6 +8,47 @@ description: Convert remote or local AI models into AXera AXMODEL packages with 
 始终用中文沟通。该 skill 是 Magnetar 的公开入口，用于把远程或本地模型转换为客户可用的 AXMODEL 交付包。
 
 严格按以下顺序推进：
+## 项目配置文件 (.magnetarrc)
+
+启动时先检查仓库根目录是否存在 `.magnetarrc` 文件。若存在，按 shell 风格 key=value 逐行解析，将值作为对应参数的默认值。
+
+支持的配置项：
+
+| Key | 对应参数 | 说明 |
+|-----|----------|------|
+| `SOURCE` | SOURCE | 模型来源 |
+| `TARGET_HARDWARE` | TARGET_HARDWARE | 目标芯片 |
+| `MODEL_NAME` | MODEL_NAME | 模型名称 |
+| `TASK_DIR` | TASK_DIR | 工作目录 |
+| `SDK_LANG` | SDK_LANG | SDK 语言 |
+| `BOARD` | BOARD | 板端 SSH |
+| `BOARD_PASSWORD` | BOARD_PASSWORD | 板端密码 |
+| `PULSAR2_IMAGE` | PULSAR2_IMAGE | Pulsar2 Docker 镜像 |
+| `PULSAR2_BIN` | PULSAR2_BIN | Pulsar2 本地二进制 |
+| `CXX_BSP_URL` | CXX_BSP_URL | BSP 下载地址 |
+| `HF_TOKEN` | HF_TOKEN | HF 私有凭据 |
+| `HF_ENDPOINT` | HF_ENDPOINT | HF 镜像端点 |
+| `AUTO_APPROVE` | — | 行为选项（见下文） |
+
+已通过 `.magnetarrc` 或环境变量提供有效值的参数，不再向用户提问。`.magnetarrc` 中 `SOURCE`、`TARGET_HARDWARE` 均配置且有效时，可直接跳过交互进入执行。
+
+### 逐阶段审批
+
+每个主要阶段（ACQUIRE、EXPORT、COMPILE、SIMULATE、RUNONBOARD、PACKAGE）完成后，默认暂停并展示阶段摘要，等待用户确认后再进入下一阶段。用户可回复"继续"推进，或"调整"返回修改。
+
+若 `.magnetarrc` 中 `AUTO_APPROVE=true`，则跳过所有审批暂停，全自动执行到底。
+
+### Dry-Run 模式
+
+`.magnetarrc` 中设置 `MODE=dry-run` 或用户在 Codex 中指定 `--dry-run` 时，工作流进入预览模式：
+
+- ACQUIRE：仅扫描 SOURCE 的元信息（文件列表、大小），不下载大文件
+- INIT：创建 TASK_DIR 和审计文件
+- 后续阶段：仅输出预估计划（检测到的导出路径、编译配置、预估耗时），不实际执行
+
+Dry-run 完成后输出完整计划供用户审阅，用户确认后可通过设置 `MODE=full` 重新运行实际转换。
+
+
 
 ## 阶段不可跳过
 
@@ -20,20 +61,30 @@ description: Convert remote or local AI models into AXera AXMODEL packages with 
 
 `ACQUIRE -> INIT -> EXPORT -> TOOLCHAIN -> COMPILE -> SIMULATE -> SDK-GEN -> RUNONBOARD -> PACKAGE`
 
-`RUNONBOARD` 必须执行。`BOARD` 在工作流入口即检查，缺失时立即 STOP，不会先执行前置阶段。遇到 `STOP` 必须暂停等待用户确认。
+RUNONBOARD 阶段的行为取决于 `BOARD` 是否提供：
+- **提供了 BOARD**：RUNONBOARD 正常执行，在板端验证模型精度、延迟和内存。
+- **未提供 BOARD**：RUNONBOARD 自动跳过，`runonboard_report.md` 标记各指标为 N/A，`performance_report.md` 中板端相关数据标注为 N/A。交付包仍然完整可用。
 
 机器可读规范见 [../../workflows/magnetar.yaml](../../workflows/magnetar.yaml)。
+
+### 断点恢复
+
+如果工作流中断（手动停止、网络故障、OOM 等），可重新运行并指定相同的 `TASK_DIR` 或 `MODEL_NAME`（使默认 TASK_DIR 匹配）：
+
+- Magnetar 会检查 `TASK_DIR` 中已有的阶段产物，从第一个缺失产物的阶段继续
+- 已完成的阶段不会重复执行
+- `task.md` 中记录每次运行的状态和中断点
 
 ## 输入
 
 - `SOURCE`: 必填。Git 仓库、HuggingFace repo、本地目录、单模型文件或可下载 URL。
 - `TARGET_HARDWARE`: 必填。默认支持 `AX650`、`AX620E`，其他 AX 芯片需确认 Pulsar2 支持。
 - `MODEL_NAME`: 可选。默认从 `SOURCE` 推断。
-- `TASK_DIR`: 可选。默认 `todos/work/<timestamp>-<model-name>/`。
+- `TASK_DIR`: 可选。默认 `todos/work/<timestamp>-<model-name>/`。可通过环境变量 `MAGNETAR_TASK_DIR` 全局覆盖默认前缀目录。
 - `SDK_LANG`: 可选。`python`、`cpp`、`both`，默认 `both`。
 - `HF_TOKEN`: 条件必填。私有 HuggingFace 模型从环境变量读取。
-- `BOARD`: 必填。板端 SSH 信息，格式优先为 `user@host[:port]`。入口即检查，缺失时 STOP。
-- `BOARD_PASSWORD`: 必填。用户已确认的默认板端密码为 `123456`。
+- `BOARD`: 可选。板端 SSH 信息，格式 `user@host[:port]`。不填则跳过 RUNONBOARD 阶段，交付包中板端数据标注 N/A。
+- `BOARD_PASSWORD`: 条件必填。提供 BOARD 时需密码，默认 `123456`。不提供 BOARD 时忽略。
 - `PULSAR2_IMAGE` 或 `PULSAR2_BIN`: 可选。Pulsar2 Docker 镜像或本地可执行文件；本地没有 Pulsar2 时，默认从 `https://hf-mirror.com/AXERA-TECH/Pulsar2/tree/main` 获取 Docker 镜像。
 - `CXX_BSP_URL`: 可选。C++ BSP SDK 下载地址，含交叉编译器和 AX runtime。默认按目标芯片选择：
   - AX650: `https://hf-mirror.com/AXERA-TECH/AX650-Community-Hub/resolve/main/sdk/edge-computing-AX650_SDK_V3.10.2/02.%20SDK/AX650_SDK_V3.10.2/AX650_SDK_V3.10.2_20260513151335.tgz`
@@ -100,6 +151,26 @@ package/
     performance_report.md
 ```
 
+
+
+## 进度报告规则
+
+每个阶段执行时，向用户报告以下信息：
+
+1. **阶段开始**：阶段名称、预计耗时（如 ACQUIRE: 预计 2-5 分钟）。
+2. **进行中**：关键操作的进度（下载百分比、编译步骤、测试结果数）。
+3. **阶段完成**：产物路径、关键指标（文件大小、精度、耗时）、是否通过验证。
+4. **下一阶段预告**：即将执行什么、是否需要用户输入。
+
+进度格式示例：
+
+```
+[2/9] EXPORT — 导出 ONNX 并验证
+  ✓ ONNX 导出完成 (12 MB, opset=17)
+  ✓ ONNX Runtime 加载通过
+  ✓ 原模型 vs ONNX cosine=0.9998
+  → 下一阶段: TOOLCHAIN (准备 Pulsar2 编译环境, 预计 5-10 分钟)
+```
 ## 强制记录
 
 每个阶段都要更新：
@@ -109,11 +180,23 @@ package/
 
 所有中间文件必须位于 `TASK_DIR`，不得修改原始模型来源。已解决的通用问题记录到仓库根目录 `issues/`。
 
+**凭据脱敏**：`task.md` 和 `analysis.md` 中不得明文记录 `BOARD_PASSWORD`、`HF_TOKEN` 等凭据。如必须引用，使用 `***` 替代。
+
 ## 环境与下载约束
 
 - 遇到 HuggingFace repo、模型权重或 Pulsar2 fallback 下载时，必须使用 `hf-mirror`，优先设置 `HF_ENDPOINT=https://hf-mirror.com`，并把实际下载端点记录到 `task.md`。
 - Python 虚拟环境统一使用 `uv` 管理：创建环境用 `uv venv`，安装依赖用 `uv pip install --python <venv>/bin/python ...`，不得使用 `python -m venv`、`virtualenv` 或 `conda` 创建任务环境。
-- 如本机缺少 `uv`，STOP 并要求用户安装或提供可用的 `uv` 路径；不要降级为其他虚拟环境管理器。
+- 如本机缺少 `uv`，先给出安装命令并 STOP：
+
+```bash
+# Linux / macOS
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# 或通过 pip
+pip install uv
+```
+
+若用户环境无法安装 uv（如离线环境、受限权限），记录到 `analysis.md` 并 STOP，等待用户提供替代方案。
 
 ## 阶段调度
 
@@ -131,7 +214,7 @@ package/
 
 必须 STOP 的情况：
 
-- `SOURCE`、`TARGET_HARDWARE` 或 `BOARD` 缺失（入口即检查，防止无效执行）。
+- `SOURCE`、`TARGET_HARDWARE` 缺失（入口即检查，防止无效执行）。
 - 主模型文件或导出入口无法自动判断。
 - 只能使用随机校准数据，且用户未确认。
 - ONNX 与原模型对分失败。
@@ -139,7 +222,11 @@ package/
 - Pulsar2 缺失，且无法从本地路径、用户提供镜像或 HuggingFace `AXERA-TECH/Pulsar2` 镜像运行。
 - 编译失败需要修改模型图或改导出策略。
 - SIMULATE 精度不达标（先查 `issues/` 目录，无匹配方案再 STOP）。
+
+   仿真阶段除了 ONNX vs AXMODEL 对比外，还应执行原模型（如 PyTorch）vs AXMODEL 的端到端对比，使用相同输入、相同后处理逻辑，报告任务级指标（如分类准确率、检测 mAP），让客户直观了解从浮点模型到芯片模型的精度损失。
 - 需要私有模型凭据、板端凭据或其他敏感输入。
+
+BOARD 缺失不是 STOP 条件——工作流自动跳过 RUNONBOARD 阶段继续执行。
 
 
 ## 接受标准
@@ -151,6 +238,7 @@ package/
 - Python SDK import 成功；上板验证时必须使用 `pyaxengine`/`AxEngineExecutionProvider` 真实运行。
 - C++ SDK 至少 `cmake configure` 成功；存在 BSP（含交叉编译器和 AX runtime）时完成交叉编译，上板验证时必须链接 AX Engine runtime 真实运行。
 - `ax_run_model` 只允许作为 AXMODEL smoke check，不能作为 Python/C++ SDK 的实现或验证替代。
+- RUNONBOARD 阶段：若提供了 BOARD，必须执行板端验证并产出报告；若未提供 BOARD，自动跳过，交付包中相关数据标注 N/A。
 
 - `package/` 满足客户从零复现的全部要求，并通过板端自验证：
   - `package/README.md` 详尽覆盖模型概述、快速开始（推理/复现两条路径）、目录说明、性能摘要、已知限制。
@@ -172,4 +260,5 @@ package/
   - 板端内存：系统内存增量、CMM 专用内存（若可获取则记录，否则 N/A）。
   - 精度汇总（多输入均值 ± 标准差）。
 - 所有性能指标为记录性质，不设硬性通过阈值；获取失败时标记 N/A。
-- `simulate/simulate_report.md` 的精度指标基于 ≥3 组输入样本，报告均值 ± 标准差，同时含仿真单次推理延迟。
+- `simulate/simulate_report.md` 的精度指标基于 ≥3 组输入样本，报告均值 ± 标准差，同时含仿真单次推理延迟。`simulate/simulate_report.md` 的精度指标基于 ≥3 组输入样本，报告均值 ± 标准差，同时含仿真单次推理延迟。
+- 交付包中应包含模型版本追溯信息：SOURCE URL/commit hash、导出时间、Pulsar2 版本、AXMODEL 编译配置 hash。当上游模型更新时，可通过这些信息判断是否需要重新编译。

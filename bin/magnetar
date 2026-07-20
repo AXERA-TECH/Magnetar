@@ -1,0 +1,230 @@
+#!/usr/bin/env bash
+# magnetar — Magnetar 模型部署 CLI 入口
+# 用法: ./magnetar <命令>
+
+set -euo pipefail
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+PROJECT_ROOT="$(pwd)"
+
+usage() {
+    cat <<EOF
+magnetar — AI 模型到 AX 芯片一键部署 CLI
+
+用法:
+  ./magnetar <命令>
+
+命令:
+  init       在当前项目创建 .magnetarrc 配置文件
+  check      检查环境依赖和配置完整性
+  status     查看最近一次任务的状态
+  run        输出 Codex 启动提示，开始模型部署
+  dry-run    预览模式：扫描模型、输出计划，不执行实际转换
+  install    安装 Pulsar2 Docker 编译环境
+  help       显示本帮助
+
+示例:
+  cd /path/to/your/project
+  ./magnetar init         # 初始化配置
+  ./magnetar check        # 检查环境
+  ./magnetar run          # 启动完整部署
+  ./magnetar dry-run      # 仅预览计划
+EOF
+}
+
+check_dep() {
+    local name="$1"
+    local hint="${2:-}"
+    if command -v "$name" &>/dev/null; then
+        echo -e "  ${GREEN}✓${NC} $name"
+        return 0
+    else
+        echo -e "  ${RED}✗${NC} $name — ${hint:-未找到}"
+        return 1
+    fi
+}
+
+cmd_init() {
+    local template="$REPO_ROOT/.magnetarrc.example"
+    local target="$PROJECT_ROOT/.magnetarrc"
+
+    if [[ -f "$target" ]]; then
+        echo -e "${YELLOW}.magnetarrc 已存在${NC}"
+        echo "如需覆盖: rm $target && ./magnetar init"
+        return 1
+    fi
+
+    cp "$template" "$target"
+    echo -e "${GREEN}.magnetarrc 已创建${NC} → $target"
+    echo ""
+    echo "请编辑配置文件:"
+    echo "  vim .magnetarrc"
+    echo ""
+    echo "编辑后运行 './magnetar check' 验证配置。"
+}
+
+cmd_check() {
+    local all_ok=0
+
+    echo -e "${CYAN}=== 环境依赖 ===${NC}"
+    check_dep git || all_ok=1
+    check_dep python3 "apt install python3" || all_ok=1
+    check_dep uv "curl -LsSf https://astral.sh/uv/install.sh | sh" || all_ok=1
+    if command -v docker &>/dev/null && docker info &>/dev/null 2>&1; then
+        echo -e "  ${GREEN}✓${NC} docker ($(docker --version | cut -d' ' -f3 | tr -d ','))"
+    else
+        echo -e "  ${YELLOW}⚠${NC} docker 未运行 — Pulsar2 编译需要"
+        all_ok=1
+    fi
+    check_dep cmake "apt install cmake" || all_ok=1
+    echo ""
+
+    echo -e "${CYAN}=== 项目配置 ===${NC}"
+    local rc="$PROJECT_ROOT/.magnetarrc"
+    if [[ ! -f "$rc" ]]; then
+        echo -e "  ${YELLOW}⚠${NC} 未找到 .magnetarrc"
+        echo "  运行 './magnetar init' 创建"
+        all_ok=1
+    else
+        source "$rc" 2>/dev/null || true
+        echo "  SOURCE:           ${SOURCE:-未配置}"
+        echo "  TARGET_HARDWARE:  ${TARGET_HARDWARE:-未配置}"
+        echo "  BOARD:            ${BOARD:-(跳过板端验证)}"
+        echo "  MODE:             ${MODE:-full}"
+        echo "  AUTO_APPROVE:     ${AUTO_APPROVE:-false}"
+        if [[ -z "${SOURCE:-}" ]] || [[ -z "${TARGET_HARDWARE:-}" ]]; then
+            echo -e "  ${YELLOW}⚠${NC} SOURCE 和 TARGET_HARDWARE 为必填"
+            all_ok=1
+        fi
+    fi
+    echo ""
+
+    echo -e "${CYAN}=== Pulsar2 ===${NC}"
+    local pulsar2_img="${PULSAR2_IMAGE:-pulsar2:6.0}"
+    if docker image inspect "$pulsar2_img" &>/dev/null 2>&1; then
+        echo -e "  ${GREEN}✓${NC} Pulsar2 Docker 镜像已加载 ($pulsar2_img)"
+    else
+        echo -e "  ${YELLOW}⚠${NC} Pulsar2 未安装 — 运行 './magnetar install'"
+    fi
+    echo ""
+
+    echo -e "${CYAN}=== Git 状态 ===${NC}"
+    if git rev-parse --git-dir &>/dev/null 2>&1; then
+        echo -e "  ${GREEN}✓${NC} Git 仓库"
+        local branch; branch="$(git branch --show-current)"
+        echo "  当前分支: $branch"
+    else
+        echo -e "  ${YELLOW}⚠${NC} 不在 Git 仓库中"
+    fi
+    echo ""
+
+    if [[ "$all_ok" -eq 0 ]]; then
+        echo -e "${GREEN}环境就绪。运行 './magnetar run' 开始部署。${NC}"
+    else
+        echo -e "${YELLOW}存在问题需要解决后再运行。${NC}"
+    fi
+    return "$all_ok"
+}
+
+cmd_status() {
+    local storage="$PROJECT_ROOT/todos/work"
+    if [[ ! -d "$storage" ]]; then
+        echo "暂无任务记录。"
+        return 0
+    fi
+
+    echo -e "${CYAN}=== 最近任务 ===${NC}"
+    local found=0
+    for task_dir in $(ls -1dt "$storage"/*/ 2>/dev/null); do
+        [[ -d "$task_dir" ]] || continue
+        found=1
+        local task_name; task_name="$(basename "$task_dir")"
+        echo ""
+        echo "  $task_name"
+        if [[ -f "$task_dir/task.md" ]]; then
+            local stage; stage=$(grep -m1 '当前阶段' "$task_dir/task.md" 2>/dev/null || echo "未知")
+            echo "    $stage"
+        fi
+        # Count completed stages
+        local stages_done=0
+        for d in export compile simulate sdk package; do
+            [[ -d "$task_dir/$d" ]] && stages_done=$((stages_done + 1))
+        done
+        echo "    已完成阶段: $stages_done/9"
+        break
+    done
+    if [[ "$found" -eq 0 ]]; then
+        echo "暂无任务记录。"
+    fi
+}
+
+cmd_run() {
+    echo ""
+    echo -e "${GREEN}在 Codex 中运行以下命令:${NC}"
+    echo ""
+    local rc="$PROJECT_ROOT/.magnetarrc"
+    if [[ -f "$rc" ]]; then
+        source "$rc" 2>/dev/null || true
+        if [[ -n "${SOURCE:-}" ]] && [[ -n "${TARGET_HARDWARE:-}" ]]; then
+            echo "  \$magnetar"
+            echo ""
+            echo "已从 .magnetarrc 读取配置:"
+            echo "  SOURCE=$SOURCE"
+            echo "  TARGET_HARDWARE=$TARGET_HARDWARE"
+            echo "  BOARD=${BOARD:-(跳过板端验证)}"
+        else
+            echo "  \$magnetar"
+            echo "  SOURCE=<你的模型路径>"
+            echo "  TARGET_HARDWARE=AX650"
+        fi
+    else
+        echo "  \$magnetar"
+        echo "  SOURCE=<模型路径/Git URL/HuggingFace repo>"
+        echo "  TARGET_HARDWARE=AX650"
+        echo ""
+        echo "或先运行 './magnetar init' 创建配置文件。"
+    fi
+    echo ""
+}
+
+cmd_dry_run() {
+    echo ""
+    echo -e "${CYAN}在 Codex 中运行以下命令:${NC}"
+    echo ""
+    echo "  \$magnetar --dry-run"
+    echo ""
+    echo "这将扫描模型文件、检查环境依赖、输出执行计划，"
+    echo "但不会下载大文件（BSP SDK、Docker 镜像）也不会编译。"
+    echo ""
+}
+
+cmd_install() {
+    if [[ -x "$REPO_ROOT/scripts/install_pulsar2.sh" ]]; then
+        exec "$REPO_ROOT/scripts/install_pulsar2.sh"
+    else
+        echo -e "${RED}未找到 install_pulsar2.sh${NC}"
+        return 1
+    fi
+}
+
+cmd="${1:-help}"
+case "$cmd" in
+    init)       cmd_init ;;
+    check)      cmd_check ;;
+    status)     cmd_status ;;
+    run)        cmd_run ;;
+    dry-run)    cmd_dry_run ;;
+    install)    cmd_install ;;
+    help|--help|-h) usage ;;
+    *)
+        echo -e "${RED}未知命令: $cmd${NC}"
+        usage
+        exit 1
+        ;;
+esac

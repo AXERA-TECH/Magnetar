@@ -29,6 +29,21 @@ description: Hidden stage for magnetar. Compare ONNX outputs with AXMODEL simula
    - 各指标的均值 ± 标准差
    - 仿真单次推理延迟（ms）
 
+### 端到端对比（原模型 vs AXMODEL）
+
+在 ONNX vs AXMODEL 仿真对比之外，额外执行原模型（如 PyTorch）vs AXMODEL 的端到端对比：
+
+1. 使用 EXPORT 阶段保留的原模型推理脚本，加载 `origin/` 中的权重。
+2. 使用相同的一组测试输入（≥3 组，与仿真对比共用）。
+3. 原模型和 AXMODEL 分别完成推理 + 后处理，输出任务级结果。
+4. 记录任务级指标到 `simulate/simulate_report.md`：
+   - 分类模型：Top-1/Top-5 准确率差异
+   - 检测模型：mAP@0.5、mAP@0.5:0.95 差异
+   - 分割模型：mIoU 差异
+   - 通用：输出 tensor cosine、MAE（已在基础对比中记录）
+
+5. 端到端指标不设硬性通过阈值（因原始模型精度不同），但必须记录供客户评估整体精度损失。
+
 ## 默认通过条件
 
 通用张量默认 `cosine >= 0.99`（基于均值）。任务指标比单一相对误差优先。

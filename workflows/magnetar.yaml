@@ -86,6 +86,7 @@ workflow:
     - uv is required for every task virtual environment; missing uv blocks the workflow instead of falling back to venv, virtualenv,
       or conda.
     - RUNONBOARD is optional unless BOARD is provided.
+    - Dry-run mode (MODE=dry-run) stops after init to present the plan; no large file downloads or compilation occur.
     - ax_run_model is only a model smoke check and never substitutes for Python/C++ SDK execution.
     open_questions: []
   capabilities:
@@ -207,18 +208,29 @@ workflow:
     - defaults to https://hf-mirror.com/AXERA-TECH/Pulsar2/tree/main when local Pulsar2 is unavailable
   - id: BOARD
     type: text
-    required: true
+    required: false
     source: user
     validation:
     - user@host[:port]
-    description: Board SSH info, format user@host[:port]. Required upfront — checked at requirements gate before any stage
-      runs.
+    description: Board SSH info, format user@host[:port]. Optional — when absent RUNONBOARD is skipped and board metrics are N/A.
   - id: BOARD_PASSWORD
     type: credential
-    required: true
+    required: false
     source: user
     validation:
-    - default AX board password 123456 may be used only because the user provided it
+    - conditionally required when BOARD is provided; default AX board password 123456
+  - id: AUTO_APPROVE
+    type: text
+    required: false
+    source: user
+    validation:
+    - true or false, defaults to false. When true, skip all per-stage confirmation pauses.
+  - id: MODE
+    type: text
+    required: false
+    source: user
+    validation:
+    - full or dry-run, defaults to full. When dry-run, only scan and plan without downloading large files or compiling.
   outputs:
   - id: axmodel
     type: file
@@ -366,13 +378,14 @@ workflow:
   - id: requirements_gate
     kind: gate
     skill: ''
-    description: Verify SOURCE, TARGET_HARDWARE, BOARD, and required capability sources before any execution
+    description: Verify SOURCE, TARGET_HARDWARE, and required capability sources before any execution. BOARD is optional — missing BOARD skips RUNONBOARD.
     depends_on: []
     parallel_group: null
     inputs:
     - SOURCE
     - TARGET_HARDWARE
-    - BOARD
+    - AUTO_APPROVE
+    - MODE
     - PULSAR2_IMAGE
     - PULSAR2_BIN
     outputs:
@@ -417,7 +430,7 @@ workflow:
     skill: .codex/skills/magnetar/hidden/init/SKILL.md
     description: Initialize TASK_DIR structure and audit logs
     depends_on:
-    - acquire
+    - stage_review_acquire
     parallel_group: null
     inputs:
     - TASK_DIR
@@ -438,12 +451,32 @@ workflow:
       action: fail
       target_step: null
     visibility: summarized
+  - id: dry_run_check
+    kind: gate
+    skill: ''
+    description: If MODE=dry-run, present scan results and estimated plan, then STOP. User must switch to MODE=full to execute.
+    depends_on:
+    - init
+    parallel_group: null
+    inputs:
+    - MODE
+    outputs:
+    - plan_accepted
+    timeout_seconds: null
+    retry:
+      max_attempts: 0
+      retry_on: []
+      backoff: none
+    on_failure:
+      action: ask_user
+      target_step: null
+    visibility: user_visible
   - id: export
     kind: agent
     skill: .codex/skills/magnetar/hidden/export/SKILL.md
     description: Export static ONNX, validate against source model, generate metadata and calibration data
     depends_on:
-    - init
+    - dry_run_check
     parallel_group: null
     inputs:
     - origin_path
@@ -474,7 +507,7 @@ workflow:
     skill: .codex/skills/magnetar/hidden/toolchain/SKILL.md
     description: Verify Pulsar2 and prepare chip-specific C++ BSP/toolchain (AX650 BSP SDK / AX620E Arm GNU)
     depends_on:
-    - export
+    - stage_review_export
     parallel_group: null
     inputs:
     - PULSAR2_IMAGE
@@ -532,7 +565,7 @@ workflow:
     skill: .codex/skills/magnetar/hidden/simulate/SKILL.md
     description: Compare ONNX and AXMODEL simulation outputs
     depends_on:
-    - compile
+    - stage_review_compile
     parallel_group: null
     inputs:
     - onnx_path
@@ -604,10 +637,92 @@ workflow:
       action: fail
       target_step: null
     visibility: user_visible
+  - id: stage_review_acquire
+    kind: gate
+    skill: ''
+    description: Present ACQUIRE stage summary and wait for user confirmation. Skipped when AUTO_APPROVE=true.
+    depends_on:
+    - acquire
+    parallel_group: null
+    inputs:
+    - AUTO_APPROVE
+    outputs:
+    - review_accepted
+    timeout_seconds: null
+    retry:
+      max_attempts: 0
+      retry_on: []
+      backoff: none
+    on_failure:
+      action: ask_user
+      target_step: null
+    visibility: user_visible
+  - id: stage_review_export
+    kind: gate
+    skill: ''
+    description: Present EXPORT stage summary (ONNX, model_meta, calibration) and wait for user confirmation. Skipped when AUTO_APPROVE=true.
+    depends_on:
+    - export
+    parallel_group: null
+    inputs:
+    - AUTO_APPROVE
+    outputs:
+    - review_accepted
+    timeout_seconds: null
+    retry:
+      max_attempts: 0
+      retry_on: []
+      backoff: none
+    on_failure:
+      action: ask_user
+      target_step: null
+    visibility: user_visible
+  - id: stage_review_compile
+    kind: gate
+    skill: ''
+    description: Present COMPILE stage summary (AXMODEL, MACs, compression ratio) and wait for user confirmation. Skipped when AUTO_APPROVE=true.
+    depends_on:
+    - compile
+    parallel_group: null
+    inputs:
+    - AUTO_APPROVE
+    outputs:
+    - review_accepted
+    timeout_seconds: null
+    retry:
+      max_attempts: 0
+      retry_on: []
+      backoff: none
+    on_failure:
+      action: ask_user
+      target_step: null
+    visibility: user_visible
+  - id: stage_review_runonboard
+    kind: gate
+    skill: ''
+    description: Present RUNONBOARD stage summary and wait for user confirmation. Skipped when AUTO_APPROVE=true or when BOARD is not provided.
+    depends_on:
+    - runonboard
+    parallel_group: null
+    inputs:
+    - AUTO_APPROVE
+    outputs:
+    - review_accepted
+    timeout_seconds: null
+    retry:
+      max_attempts: 0
+      retry_on: []
+      backoff: none
+    on_failure:
+      action: ask_user
+      target_step: null
+    visibility: user_visible
+    skip_condition: BOARD is not provided
+
   - id: runonboard
     kind: agent
     skill: .codex/skills/magnetar/hidden/runonboard/SKILL.md
-    description: Validate Python and C++ SDKs on the AX board. BOARD is already verified at requirements gate.
+    description: Validate Python and C++ SDKs on the AX board. Skipped when BOARD is not provided.
     depends_on:
     - sdk_gen
     parallel_group: null
@@ -634,13 +749,14 @@ workflow:
       action: ask_user
       target_step: null
     visibility: user_visible
+    skip_condition: BOARD is not provided
   - id: package
     kind: agent
     skill: .codex/skills/magnetar/hidden/package/SKILL.md
     description: 'Assemble final customer package with complete reproducibility: requirements.txt, compile script, detailed
       READMEs for all subdirectories'
     depends_on:
-    - runonboard
+    - stage_review_runonboard
     parallel_group: null
     inputs:
     - axmodel_path
@@ -677,12 +793,10 @@ workflow:
     pass_when:
     - SOURCE is provided
     - TARGET_HARDWARE is provided
-    - BOARD is provided (RUNONBOARD is mandatory)
     fail_when:
-    - required input is missing
-    - BOARD is not provided
+    - SOURCE or TARGET_HARDWARE is missing
     on_pass: proceed to acquire
-    on_fail: ask user for missing input (including BOARD)
+    on_fail: ask user for missing input
   - id: pulsar2_available
     kind: capability
     depends_on:
@@ -735,7 +849,7 @@ workflow:
     - any README contains placeholder text ("...", "<path>", "<fill me>")
     - pulsar2 build command is incomplete or omitted
     - requirements.txt is missing
-    - BOARD was not provided so RUNONBOARD could not execute
+    - RUNONBOARD could not execute with provided BOARD
     on_pass: succeeded
     on_fail: failed
   failure_policy:
@@ -747,7 +861,7 @@ workflow:
     - accuracy_gate failure → rollback to compile (apply issues/ fix or user-adjusted tuning)
     - package directory rewrite after failed package validation
     ask_user_for:
-    - missing SOURCE, TARGET_HARDWARE, or BOARD (checked at requirements gate)
+    - missing SOURCE or TARGET_HARDWARE (checked at requirements gate)
     - private model credentials
     - ambiguous model file or export entry
     - unavailable Pulsar2
@@ -784,7 +898,7 @@ workflow:
     - package/reports/simulate_report.md exists
     - package/reports/performance_report.md exists with all required sections
     - package/README.md exists and covers model overview, quick start, directory layout, performance, and limitations
-    - RUNONBOARD has been executed and report exists
+    - RUNONBOARD has been attempted (executed when BOARD provided, skipped when absent) and report exists
     - no README contains placeholder text
     failure_when:
     - required Pulsar2 capability is unavailable
@@ -792,7 +906,7 @@ workflow:
     - AXMODEL compile fails with no accepted repair path
     - SDK generation fails
     - acceptance checks fail after retry budget is exhausted
-    - BOARD was not provided (checked at requirements gate, should never reach here)
+    - required Pulsar2 capability is unavailable
     final_response:
       include_artifacts: true
       include_assumptions: true

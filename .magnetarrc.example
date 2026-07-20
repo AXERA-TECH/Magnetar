@@ -1,0 +1,67 @@
+# .magnetarrc — Magnetar 模型部署工作流项目配置
+# 复制为 .magnetarrc 并按需修改。
+# Codex 会在启动时读取此文件，已配置的项不再重复提问。
+
+# ===== 必需参数 =====
+
+# 模型来源: Git 仓库 | HuggingFace repo | 本地目录 | 单文件路径 | 可下载 URL
+SOURCE=
+
+# 目标芯片: AX650 | AX620E
+TARGET_HARDWARE=AX650
+
+# ===== 板端验证（可选）=====
+# 留空则跳过 RUNONBOARD 阶段
+
+# 板端 SSH 信息，格式 user@host[:port]
+BOARD=
+
+# 板端密码（默认 123456）
+BOARD_PASSWORD=123456
+
+# ===== 可选参数 =====
+
+# 模型名称（留空则从 SOURCE 自动推断）
+MODEL_NAME=
+
+# 任务工作目录（留空则自动生成 todos/work/<timestamp>-<model>/）
+# 也可通过环境变量 MAGNETAR_TASK_DIR 全局覆盖
+TASK_DIR=
+
+# SDK 语言: python | cpp | both
+SDK_LANG=both
+
+# ===== Pulsar2 编译环境 =====
+
+# Pulsar2 Docker 镜像（留空则自动从默认路径获取）
+PULSAR2_IMAGE=
+
+# Pulsar2 本地可执行文件路径（留空则使用 Docker）
+PULSAR2_BIN=
+
+# ===== C++ BSP / 交叉编译器 =====
+
+# AX650 BSP SDK 下载地址（留空使用默认）
+# CXX_BSP_URL=
+
+# AX620E 交叉编译器下载地址（留空使用默认）
+# CXX_BSP_URL=
+
+# ===== HuggingFace 凭据 =====
+
+# 私有模型访问令牌（留空则从环境变量 HF_TOKEN 读取）
+# HF_TOKEN=
+
+# HuggingFace 镜像端点（国内默认 hf-mirror，海外用户可设为空字符串）
+# HF_ENDPOINT=https://hf-mirror.com
+
+# ===== 行为选项 =====
+
+# 是否自动通过各阶段审批: true | false
+# true 时工作流全自动运行，不会在每个阶段暂停等待确认
+AUTO_APPROVE=false
+
+# 运行模式: full | dry-run
+# full    — 完整执行所有阶段
+# dry-run — 仅预览：扫描模型、检查环境、输出计划，不下载大文件也不编译
+MODE=full

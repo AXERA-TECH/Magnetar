@@ -114,7 +114,23 @@ HF README 必须以 YAML frontmatter 开头，含 `language`、`license`、`tags
 5. 生成 `package/README.md`（详见下方 [顶层 README.md](#顶层-readmemd)）。
 6. 生成项目级辅助文件：
    - `.gitignore`: 忽略 Python 缓存、CMake build、临时输出文件。
-   - 可选 `manifest.json`: 列出文件 SHA256、版本、时间戳。
+   - `manifest.json`（必须）：列出交付包中每个文件的 SHA256 哈希、文件大小（字节）、最后修改时间。格式：
+
+```json
+{
+  "package_version": "1.0",
+  "generated_at": "2026-07-20T12:00:00Z",
+  "model_name": "yolov8n",
+  "target_hardware": "AX650",
+  "pulsar2_version": "6.0",
+  "files": [
+    {"path": "models/model.axmodel", "sha256": "abc123...", "size_bytes": 4123456},
+    {"path": "models/model_meta.json", "sha256": "def456...", "size_bytes": 1234}
+  ]
+}
+```
+
+客户可通过 `sha256sum -c <(jq -r '.files[] | "\(.sha256)  \(.path)"' manifest.json)` 验证交付包完整性。
 
 ## 目录结构
 

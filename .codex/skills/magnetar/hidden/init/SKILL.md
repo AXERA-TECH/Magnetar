@@ -42,6 +42,7 @@ TASK_DIR/
    - 已知约束和假设
 5. 检查 `uv` 可用性；缺少 `uv` 时 STOP，不得降级到 `python -m venv`、`virtualenv` 或 `conda`。
 6. 记录环境摘要：Python、uv、docker、pulsar2、cmake、git。
+7. 检查磁盘空间：计算所需存储（BSP SDK ~5 GB + Docker 镜像 ~3 GB + 模型文件 + 中间产物），与当前可用磁盘空间比较。若剩余空间不足所需 1.5 倍，在 `analysis.md` 中记录警告但继续；若不足所需空间，STOP 并告知用户释放空间。
 
 ## Python 环境约束
 

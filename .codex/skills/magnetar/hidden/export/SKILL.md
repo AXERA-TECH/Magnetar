@@ -48,7 +48,10 @@ Pulsar2 仅支持静态 shape 的 ONNX。所有输入维度必须为具体整数
   - `opset`
   - `onnx_size_bytes`: ONNX 文件字节数（用于后续压缩比计算）。
   - `tokenizer_path` 或其他附属资源路径。
-- `calib_data/`，优先真实数据。
+- `calib_data/`，优先真实数据。若用户无校准数据，按以下优先级自动获取：
+  1. 从 COCO val2017 随机采样（检测/分割模型）
+  2. 从 ImageNet val 随机采样（分类模型）
+  3. 生成正态分布随机数据（仅作 fallback，需用户确认）
 - `export_report.md`。
 
 - 记录 ONNX 文件大小（字节）到 `model_meta.json` 的 `onnx_size_bytes` 和 `export_report.md`。
@@ -72,5 +75,5 @@ Pulsar2 仅支持静态 shape 的 ONNX。所有输入维度必须为具体整数
 - 原模型推理无法跑通。
 - 导出入口不明确。
 - ONNX 与原模型对分失败。
-- 只能生成随机校准数据且未获用户确认。
+- 只能生成随机校准数据且未获用户确认。Magnetar 会优先尝试从公开数据集自动采样，仅在无可用数据集时才降级为随机数据。
 - 动态 shape 无法静态化。

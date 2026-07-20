@@ -1,8 +1,39 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+check_dep() {
+    local name="$1"
+    local hint="${2:-}"
+    if command -v "$name" &>/dev/null; then
+        echo -e "  ${GREEN}✓${NC} $name"
+        return 0
+    else
+        echo -e "  ${RED}✗${NC} $name — 未找到${hint:+ 安装: $hint}"
+        return 1
+    fi
+}
+
+check_docker() {
+    if command -v docker &>/dev/null && docker info &>/dev/null 2>&1; then
+        echo -e "  ${GREEN}✓${NC} docker ($(docker --version | cut -d' ' -f3 | tr -d ','))"
+        return 0
+    elif command -v docker &>/dev/null; then
+        echo -e "  ${YELLOW}⚠${NC} docker 已安装但未运行 — sudo systemctl start docker"
+        return 1
+    else
+        echo -e "  ${RED}✗${NC} docker — 未找到 安装: curl -fsSL https://get.docker.com | sh"
+        return 1
+    fi
+}
+
 usage() {
-  cat <<'EOF'
+    cat <<'EOF'
 Usage: ./setup.sh [--copy|--link] [--force]
 
 Install the Magnetar Codex skill into:
@@ -16,6 +47,23 @@ Options:
            Show this help.
 EOF
 }
+
+echo ""
+echo -e "${CYAN}=== Magnetar 环境依赖检查 ===${NC}"
+echo ""
+DEPS_OK=0
+check_dep git || DEPS_OK=1
+check_dep python3 "apt install python3" || DEPS_OK=1
+check_dep uv "curl -LsSf https://astral.sh/uv/install.sh | sh" || DEPS_OK=1
+check_docker || DEPS_OK=1
+check_dep cmake "apt install cmake" || DEPS_OK=1
+check_dep bash || DEPS_OK=1
+echo ""
+
+if [ "$DEPS_OK" -ne 0 ]; then
+    echo -e "${YELLOW}部分依赖缺失，请先安装后再运行 setup.sh。${NC}"
+    echo ""
+fi
 
 mode="copy"
 force="false"
@@ -79,5 +127,13 @@ echo "Installed Magnetar skill:"
 echo "  source: $skill_src"
 echo "  target: $skill_dst"
 echo
+echo "接下来请安装 Pulsar2 编译环境:"
+echo "  ./scripts/install_pulsar2.sh"
+echo
 echo "Try it with:"
 echo '  Use $magnetar to convert SOURCE to an AXMODEL package with Python and C++ SDKs.'
+
+if [ "$DEPS_OK" -ne 0 ]; then
+    echo ""
+    echo -e "${YELLOW}注意: 部分依赖缺失，Pulsar2 编译和 C++ SDK 构建可能失败。${NC}"
+fi

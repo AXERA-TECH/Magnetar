@@ -13,7 +13,7 @@ description: Hidden stage for magnetar. Acquire a remote or local model into TAS
 2. 按来源类型处理：
    - Git: `git clone --depth=1 SOURCE TASK_DIR/origin`
    - HuggingFace: 设置 `HF_ENDPOINT=https://hf-mirror.com`，用 `huggingface_hub.snapshot_download()` 下载到 `origin/`，私有模型读取 `HF_TOKEN`
-   - HTTP/HTTPS 文件: 下载到 `origin/`
+   - HTTP/HTTPS 文件: 下载到 `origin/`（使用 `wget -c` 或 `curl -C -` 支持断点续传；若下载中断，重试时自动从断点继续）
    - 本地目录: 复制目录内容到 `origin/`
    - 本地文件: 复制到 `origin/`
 3. 若 SOURCE 是单个 ONNX 文件：仍需执行完整 ACQUIRE 流程。将该文件复制到 `origin/`，扫描候选时重点记录：
@@ -37,6 +37,13 @@ description: Hidden stage for magnetar. Acquire a remote or local model into TAS
 
 - 所有 HuggingFace 下载必须走 `hf-mirror`；不得直接访问 `https://huggingface.co` 下载模型文件。
 - 记录实际使用的 `HF_ENDPOINT`、repo id、revision 和下载命令到 `task.md` 与 `analysis.md`。
+
+## 重试策略
+
+- 下载失败自动重试 2 次（指数退避：5s、15s）
+- 支持断点续传的文件（HTTP 下载）从中断位置继续，不重新下载
+- Git clone 使用 `--depth=1` 减小传输量；失败时尝试完整 clone
+- HuggingFace 下载失败时，检查 `HF_ENDPOINT` 连通性，必要时提示用户检查网络或切换镜像
 
 ## STOP
 
