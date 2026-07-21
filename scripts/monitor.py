@@ -437,7 +437,7 @@ def _start_input_listener():
                 if select.select([sys.stdin], [], [], 0.15)[0]:
                     ch = sys.stdin.read(1)
                     if ch == '\x1b':
-                        if select.select([sys.stdin], [], [], 0.01)[0]:
+                        if select.select([sys.stdin], [], [], 0.05)[0]:
                             seq = sys.stdin.read(2)
                             if seq == '[C':
                                 _KEY_QUEUE.put('right')
@@ -510,7 +510,7 @@ def _build_footer(task_dir: str, all_tasks: list[str], task_idx: int) -> Panel:
     now = datetime.now().strftime("%H:%M:%S")
 
     if total > 1:
-        hint = f"n/p/←/→:切换任务 1-{min(total,9)}:直达 q:退出"
+        hint = f"n/p/←/→:切换任务 1-{min(total,9)}:直达 q/Ctrl+C:退出"
         parts = [
             f"  {now}  │  任务 [{task_idx+1}/{total}] {name}  ",
             f"│  状态来源: {source}  ",
@@ -580,7 +580,7 @@ def main():
                         break
                 key = _get_key()
                 while key is not None:
-                    if key in ("q", "Q", "esc"):
+                    if key in ("q", "Q"):
                         running = False
                     elif key in ("n", "N", "right"):
                         task_idx = (task_idx + 1) % len(all_tasks)
@@ -604,7 +604,7 @@ def main():
 
                     key = _get_key()
                     while key is not None:
-                        if key in ("q", "Q", "esc"):
+                        if key in ("q", "Q"):
                             running = False
                             break
                         elif key in ("n", "N", "right"):
