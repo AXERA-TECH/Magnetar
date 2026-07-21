@@ -12,6 +12,7 @@ artifact 仅用于补充详情（文件大小、精度指标等）。
 from __future__ import annotations
 
 import argparse
+import atexit
 import json
 import os
 import queue
@@ -21,7 +22,6 @@ import sys
 import termios
 import threading
 import time
-import tty
 from datetime import datetime
 
 from rich.console import Console
@@ -426,43 +426,61 @@ def _build_metrics_table(task_dir: str, statuses: list) -> Table:
 # ─── CLI ───────────────────────────────────────────
 
 _KEY_QUEUE: queue.Queue = queue.Queue()
+_TERMIOS_SAVED: list | None = None
 
 
 def _start_input_listener():
-    """在 daemon 线程中监听 stdin 按键，通过队列发送给主线程。
-
-    raw 模式仅限于此线程内部，不影响 Rich 的主线程终端控制。
-    """
+    """在 daemon 线程中监听 stdin 按键，通过队列发送给主线程。"""
     def _listen():
-        fd = sys.stdin.fileno()
-        try:
-            old = termios.tcgetattr(fd)
-            tty.setraw(fd)
+        while True:
             try:
-                while True:
-                    if select.select([sys.stdin], [], [], 0.15)[0]:
-                        ch = sys.stdin.read(1)
-                        if ch == '\x1b':
-                            if select.select([sys.stdin], [], [], 0.01)[0]:
-                                seq = sys.stdin.read(2)
-                                if seq == '[C':
-                                    _KEY_QUEUE.put('right')
-                                    continue
-                                if seq == '[D':
-                                    _KEY_QUEUE.put('left')
-                                    continue
-                            _KEY_QUEUE.put('esc')
-                        else:
-                            _KEY_QUEUE.put(ch)
+                if select.select([sys.stdin], [], [], 0.15)[0]:
+                    ch = sys.stdin.read(1)
+                    if ch == '\x1b':
+                        if select.select([sys.stdin], [], [], 0.01)[0]:
+                            seq = sys.stdin.read(2)
+                            if seq == '[C':
+                                _KEY_QUEUE.put('right')
+                                continue
+                            if seq == '[D':
+                                _KEY_QUEUE.put('left')
+                                continue
+                        _KEY_QUEUE.put('esc')
+                    else:
+                        _KEY_QUEUE.put(ch)
             except (OSError, ValueError, EOFError):
-                pass
-            finally:
-                termios.tcsetattr(fd, termios.TCSADRAIN, old)
-        except termios.error:
-            pass  # 非 tty 环境，不支持按键监听
+                break
 
     t = threading.Thread(target=_listen, daemon=True)
     t.start()
+
+def _setup_terminal():
+    """仅关闭行缓冲和回显，不设全 raw 模式。"""
+    global _TERMIOS_SAVED
+    try:
+        fd = sys.stdin.fileno()
+        _TERMIOS_SAVED = termios.tcgetattr(fd)
+        new = termios.tcgetattr(fd)
+        # 关行缓冲 (ICANON) + 关回显 (ECHO)，保留其他一切
+        new[3] = new[3] & ~(termios.ICANON | termios.ECHO)
+        # 非阻塞读
+        new[6][termios.VMIN] = 0
+        new[6][termios.VTIME] = 0
+        termios.tcsetattr(fd, termios.TCSANOW, new)
+    except termios.error:
+        _TERMIOS_SAVED = None
+
+
+def _restore_terminal():
+    """恢复终端设置。atexit + finally 双重保障。"""
+    global _TERMIOS_SAVED
+    if _TERMIOS_SAVED is not None:
+        try:
+            termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, _TERMIOS_SAVED)
+        except termios.error:
+            pass
+        _TERMIOS_SAVED = None
+
 
 
 def _get_key() -> str | None:
@@ -539,6 +557,9 @@ def main():
         console.print(build_layout(args.task_dir))
         return
 
+    # 终端设置：主线程负责开关，daemon 线程只轮询
+    _setup_terminal()
+    atexit.register(_restore_terminal)
     # 启动后台按键监听线程
     _start_input_listener()
     running = True
@@ -580,6 +601,8 @@ def main():
                     break
     except KeyboardInterrupt:
         pass
+    finally:
+        _restore_terminal()
 
     console.print("\n[dim]监控已停止[/dim]")
 
