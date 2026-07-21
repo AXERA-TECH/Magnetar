@@ -17,6 +17,99 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+# ─── task.md 阶段状态解析（与 monitor.py 一致）───
+
+STAGES_LIST = [
+    ("ACQUIRE",   "获取模型"),
+    ("INIT",      "初始化工作目录"),
+    ("EXPORT",    "导出静态ONNX"),
+    ("TOOLCHAIN", "准备编译工具链"),
+    ("COMPILE",   "Pulsar2 编译"),
+    ("SIMULATE",  "仿真精度对分"),
+    ("SDK-GEN",   "生成 SDK"),
+    ("RUNONBOARD","板端验证"),
+    ("PACKAGE",   "打包交付"),
+]
+
+def _classify_status(text: str) -> str | None:
+    t = text.strip().lower()
+    if any(k in t for k in ["完成", "completed", "pass", "✅"]):
+        return "done"
+    if any(k in t for k in ["进行中", "🔄"]):
+        return "running"
+    if "⚠" in t:
+        return "partial"
+    if any(k in t for k in ["n/a", "跳过", "skipped"]):
+        return "skipped"
+    if any(k in t for k in ["待执行", "pending", "⏳", "⬜"]):
+        return "pending"
+    if t.strip() in ("−", "-"):
+        return "skipped"
+    return None
+
+def parse_task_md(task_dir: str) -> dict[str, str]:
+    task_md = os.path.join(task_dir, "task.md")
+    if not os.path.isfile(task_md):
+        return {}
+    with open(task_md) as f:
+        lines = f.readlines()
+    table_start = None
+    for i, line in enumerate(lines):
+        if "阶段状态" in line:
+            table_start = i
+    if table_start is None:
+        return {}
+    header_line = None
+    for j in range(table_start + 1, min(table_start + 8, len(lines))):
+        stripped = lines[j].strip()
+        if stripped.startswith("|") and "阶段" in stripped:
+            header_line = j
+            break
+    if header_line is None:
+        return {}
+    hcells = [c.strip() for c in lines[header_line].split("|")]
+    status_col = None
+    for ci, cell in enumerate(hcells):
+        if "状态" in cell:
+            status_col = ci
+            break
+    if status_col is None:
+        return {}
+    result = {}
+    for j in range(header_line + 1, len(lines)):
+        stripped = lines[j].strip()
+        if not stripped.startswith("|"):
+            break
+        if re.match(r'^\|[\s\-:]+\|', stripped):
+            continue
+        cells = [c.strip() for c in stripped.split("|")]
+        if len(cells) < status_col + 1:
+            continue
+        sn = cells[1]
+        sr = cells[status_col]
+        for name, _ in STAGES_LIST:
+            if name.upper() in sn.upper():
+                parsed = _classify_status(sr)
+                if parsed:
+                    result[name] = parsed
+                break
+    return result
+
+def _infer_completed(task_dir: str, stage_name: str) -> str:
+    checks = {
+        "ACQUIRE":    "cache/acquire/manifest.json",
+        "EXPORT":     "export/model.onnx",
+        "COMPILE":    "compile/model.axmodel",
+        "SIMULATE":   "simulate/simulate_report.md",
+        "SDK-GEN":    "sdk/sdk_report.md",
+        "RUNONBOARD": "runonboard/runonboard_report.md",
+        "PACKAGE":    "package/README.md",
+    }
+    if stage_name in checks:
+        path = os.path.join(task_dir, checks[stage_name])
+        return "done" if os.path.isfile(path) and os.path.getsize(path) > 0 else "pending"
+    return "pending"
+
 STAGES = [
     ("ACQUIRE", "获取模型", "cache/acquire/manifest.json"),
     ("INIT", "初始化工作目录", "task.md"),
@@ -106,55 +199,22 @@ Magnetar &mdash; AXera AI Model Deployment Pipeline &nbsp;|&nbsp; {generated_at}
 </body>
 </html>"""
 
-def check_status(task_dir: str, stage_name: str, artifact: str | None) -> str:
-    """Determine stage status."""
-    if artifact and os.path.exists(os.path.join(task_dir, artifact)):
-        if os.path.getsize(os.path.join(task_dir, artifact)) > 0:
-            return "done"
-        return "running"
-    
-    # Check stage dir
-    stage_dir_map = {
-        "INIT": None, "TOOLCHAIN": None,
-        "EXPORT": "export", "COMPILE": "compile",
-        "SIMULATE": "simulate", "SDK-GEN": "sdk",
-        "RUNONBOARD": "runonboard", "PACKAGE": "package",
-    }
-    
-    sdir = stage_dir_map.get(stage_name)
-    if sdir:
-        full = os.path.join(task_dir, sdir)
-        if os.path.isdir(full) and os.listdir(full):
-            return "done"
-    
-    # Check task.md for running status
-    task_md = os.path.join(task_dir, "task.md")
-    if os.path.exists(task_md):
-        with open(task_md) as f:
-            if re.search(rf"{stage_name}.*?(进行中|running)", f.read(), re.IGNORECASE):
-                return "running"
-    
-    return "pending"
+def check_status(task_dir: str, stage_name: str) -> str:
+    """权威来源: task.md 阶段状态表 > artifact 推测 > pending。
+    遍历 STAGES_LIST 即可，artifact 参数不再需要。
+    """
+    md = parse_task_md(task_dir)
+    if stage_name in md:
+        return md[stage_name]
+    return _infer_completed(task_dir, stage_name)
 
 def build_pipeline_html(task_dir: str) -> str:
     """Build pipeline row HTML."""
     parts = []
     for i, (name, desc, artifact) in enumerate(STAGES):
-        # Check skip for RUNONBOARD
-        if name == "RUNONBOARD":
-            analysis = os.path.join(task_dir, "analysis.md")
-            if os.path.exists(analysis):
-                with open(analysis) as f:
-                    if "N/A" in f.read() and "BOARD" in f.read():
-                        status = "skipped"
-                    else:
-                        status = check_status(task_dir, name, artifact)
-            else:
-                status = check_status(task_dir, name, artifact)
-        else:
-            status = check_status(task_dir, name, artifact)
+        status = check_status(task_dir, name)
         
-        icons = {"done": "✓", "running": "◉", "pending": "○", "skipped": "−"}
+        icons = {"done": "✓", "running": "◉", "pending": "○", "skipped": "−", "partial": "⚠"}
         
         parts.append(
             f'<div class="stage {status}">'
@@ -242,13 +302,14 @@ def build_details_html(task_dir: str) -> str:
     rows = []
     
     for name, desc, artifact in STAGES:
-        status = check_status(task_dir, name, artifact)
+        status = check_status(task_dir, name)
         
         status_badges = {
             "done": '<span class="badge badge-pass">完成</span>',
             "running": '<span class="badge badge-warn">进行中</span>',
             "pending": '<span class="badge badge-fail">等待</span>',
             "skipped": '<span class="badge" style="background:#161b22;color:#484f58;">跳过</span>',
+            "partial": '<span class="badge badge-warn">部分</span>',
         }
         
         detail = _get_detail(task_dir, name, status)
@@ -273,6 +334,8 @@ def _get_detail(task_dir: str, name: str, status: str) -> str:
         return '<span class="na">—</span>'
     if status == "skipped":
         return '<span class="na">N/A — 未提供 BOARD</span>'
+    if status == "partial":
+        return '<span class="na">部分完成（详见报告）</span>'
     
     details = {
         "EXPORT": _file_size(os.path.join(task_dir, "export/model.onnx"), "MB"),

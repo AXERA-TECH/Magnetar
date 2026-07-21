@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Magnetar 工作流 TUI 监控面板。
 
+权威状态来源：TASK_DIR/task.md 中的"阶段状态"表格。
+artifact 仅用于补充详情（文件大小、精度指标等）。
+
 用法:
     python3 scripts/monitor.py <TASK_DIR>
     python3 scripts/monitor.py todos/work/20260720-mymodel/
-
-从 TASK_DIR 中的 task.md 和阶段产物实时展示 9 阶段流水线进度。
 """
 
 from __future__ import annotations
@@ -17,353 +18,402 @@ import re
 import sys
 import time
 from datetime import datetime
-from pathlib import Path
-from typing import Optional
 
 from rich.console import Console
 from rich.live import Live
 from rich.panel import Panel
-from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 from rich.text import Text
 from rich.layout import Layout
 from rich import box
 
 STAGES = [
-    ("ACQUIRE", "获取模型"),
-    ("INIT", "初始化工作目录"),
-    ("EXPORT", "导出静态ONNX"),
+    ("ACQUIRE",   "获取模型"),
+    ("INIT",      "初始化工作目录"),
+    ("EXPORT",    "导出静态ONNX"),
     ("TOOLCHAIN", "准备编译工具链"),
-    ("COMPILE", "Pulsar2 编译"),
-    ("SIMULATE", "仿真精度对分"),
-    ("SDK-GEN", "生成 Python/C++ SDK"),
-    ("RUNONBOARD", "板端验证"),
-    ("PACKAGE", "打包客户交付包"),
+    ("COMPILE",   "Pulsar2 编译"),
+    ("SIMULATE",  "仿真精度对分"),
+    ("SDK-GEN",   "生成 Python/C++ SDK"),
+    ("RUNONBOARD","板端验证"),
+    ("PACKAGE",   "打包客户交付包"),
 ]
-
-STAGE_DIRS = [
-    None,       # ACQUIRE - uses cache/acquire/
-    None,       # INIT - no artifact dir
-    "export",
-    None,       # TOOLCHAIN - uses cache/toolchain/
-    "compile",
-    "simulate",
-    "sdk",
-    "runonboard",
-    "package",
-]
-
-STAGE_FILES = {
-    "ACQUIRE": "cache/acquire/manifest.json",
-    "EXPORT": "export/model.onnx",
-    "COMPILE": "compile/model.axmodel",
-    "SIMULATE": "simulate/simulate_report.md",
-    "SDK-GEN": "sdk/sdk_report.md",
-    "RUNONBOARD": "runonboard/runonboard_report.md",
-    "PACKAGE": "package/README.md",
-}
 
 console = Console()
 
-def parse_task_md(path: str) -> dict:
-    """Parse task.md to extract stage statuses."""
-    result: dict = {}
-    if not os.path.exists(path):
-        return result
-    
-    with open(path) as f:
-        content = f.read()
-    
-    # Try to find stage status table
-    for stage_name, _ in STAGES:
-        # Look for stage status markers
-        patterns = [
-            rf"{stage_name}.*?✓",
-            rf"{stage_name}.*?完成",
-            rf"{stage_name}.*?通过",
-            rf"{stage_name}.*?COMPLETED",
-            rf"{stage_name}.*?PASS",
-        ]
-        for pat in patterns:
-            if re.search(pat, content, re.IGNORECASE):
-                result[stage_name] = "completed"
+# ─── task.md 阶段状态表解析 ────────────────────────────
+
+def parse_task_md(task_dir: str) -> dict[str, str]:
+    """从 task.md 的阶段状态表格中提取每个阶段的状态。
+
+    返回 {'ACQUIRE': 'completed', 'INIT': 'running', ...}
+    只返回在表格中有明确状态值的阶段，不在表中的不返回。
+    找不到 task.md 或表格时返回空 dict。
+    """
+    task_md = os.path.join(task_dir, "task.md")
+    if not os.path.isfile(task_md):
+        return {}
+
+    with open(task_md) as f:
+        lines = f.readlines()
+
+    # 找到最后一个"阶段状态"所在行（task.md 可能有多张表，最后一张是最新状态）
+    table_start = None
+    for i, line in enumerate(lines):
+        if "阶段状态" in line:
+            table_start = i  # keep overwriting to get the last one
+    if table_start is None:
+        return {}
+
+    # 从 table_start 之后找第一个 markdown 表格行（以 | 开头）
+    header_line = None
+    for j in range(table_start + 1, min(table_start + 8, len(lines))):
+        stripped = lines[j].strip()
+        if stripped.startswith("|") and "阶段" in stripped:
+            header_line = j
+            break
+    if header_line is None:
+        # 没有表格头 — 可能是空表格（如 parking-lot-yolo26m）
+        return {}
+
+    # 解析表头：确定"状态"列在第几列
+    header_cells = [c.strip() for c in lines[header_line].split("|")]
+    # header 形如 ['', '阶段', '状态', '开始时间', '完成时间', '']
+    # 找到"状态"列索引（1-based from split）
+    status_col = None
+    for ci, cell in enumerate(header_cells):
+        if "状态" in cell:
+            status_col = ci
+            break
+    if status_col is None:
+        return {}
+
+    result: dict[str, str] = {}
+    for j in range(header_line + 1, len(lines)):
+        stripped = lines[j].strip()
+        if not stripped.startswith("|"):
+            break  # 表格结束
+        # 跳过分隔线（|------|）
+        if re.match(r'^\|[\s\-:]+\|', stripped):
+            continue
+        cells = [c.strip() for c in stripped.split("|")]
+        # cells 形如 ['', 'ACQUIRE', '✅ 完成', '18:19', '18:34', '']
+        if len(cells) < status_col + 1:
+            continue
+        stage_name = cells[1]
+        status_raw = cells[status_col]
+
+        # 匹配已知的阶段名
+        matched = None
+        for sn, _ in STAGES:
+            if sn.upper() in stage_name.upper():
+                matched = sn
                 break
-        else:
-            # Check if stage has started
-            if re.search(rf"{stage_name}", content, re.IGNORECASE):
-                result[stage_name] = "running"
-    
+        if matched is None:
+            continue
+
+        parsed = _classify_status(status_raw)
+        if parsed:
+            result[matched] = parsed
+
     return result
 
-def check_artifact(task_dir: str, stage_name: str) -> str:
-    """Check if a stage's key artifact exists."""
-    if stage_name in STAGE_FILES:
-        artifact = os.path.join(task_dir, STAGE_FILES[stage_name])
-        if os.path.exists(artifact):
-            size = os.path.getsize(artifact)
-            if size > 0:
-                return "completed"
-            return "running"
-    
-    # Check stage directory for any content
-    for i, (sn, _) in enumerate(STAGES):
-        if sn == stage_name and STAGE_DIRS[i]:
-            sdir = os.path.join(task_dir, STAGE_DIRS[i])
-            if os.path.isdir(sdir) and os.listdir(sdir):
-                return "completed"
-    
-    return "pending"
 
-def get_stage_statuses(task_dir: str) -> list[tuple[str, str, str]]:
-    """Return [(stage_name, status, detail), ...] for all 9 stages."""
-    task_md_path = os.path.join(task_dir, "task.md")
-    md_statuses = parse_task_md(task_md_path)
-    
-    # Determine RUNONBOARD skip
-    analysis_path = os.path.join(task_dir, "analysis.md")
-    board_skip = False
-    if os.path.exists(analysis_path):
-        with open(analysis_path) as f:
-            if "N/A" in f.read() and "BOARD" in f.read():
-                board_skip = True
-    
-    results = []
-    for stage_name, stage_desc in STAGES:
-        # Priority: artifact > task.md > default
-        artifact_status = check_artifact(task_dir, stage_name)
-        md_status = md_statuses.get(stage_name, "pending")
-        
-        if artifact_status == "completed":
-            status = "completed"
-        elif md_status == "running":
-            status = "running"
-        elif artifact_status == "running":
-            status = "running"
-        else:
-            status = "pending"
-        
-        # Special case for RUNONBOARD
-        if stage_name == "RUNONBOARD" and board_skip:
-            status = "skipped"
-        
-        # Build detail string
-        detail = _get_stage_detail(task_dir, stage_name, status)
-        
-        results.append((stage_name, stage_desc, status, detail))
-    
-    return results
+def _classify_status(text: str) -> str | None:
+    """将 task.md 中任意格式的状态文本映射为 'completed'/'running'/'pending'/'skipped'/'partial'。
 
-def _get_stage_detail(task_dir: str, stage_name: str, status: str) -> str:
-    """Get human-readable detail for a stage."""
-    if status == "pending":
-        return ""
-    if status == "skipped":
-        return "N/A — 未提供 BOARD"
-    
+    已知格式：
+    - "✅ 完成" / "完成" / "✅" → completed
+    - "🔄 进行中" / "进行中" → running
+    - "⏳ 待执行" / "⬜ 待执行" / "待执行" / "⏳" / "⬜" → pending
+    - "⚠️" / "部分完成" → partial（部分完成或有已知问题）
+    - "N/A" / "跳过" / "−" → skipped
+    """
+    t = text.strip().lower()
+
+    # completed: Chinese text or solo ✅
+    if any(k in t for k in ["完成", "completed", "pass", "✅"]):
+        return "completed"
+    # running: 🔄 + 进行中 combo, or "running" text
+    if any(k in t for k in ["进行中", "🔄"]):
+        return "running"
+    # partial: ⚠️ = completed with known issues
+    if "⚠" in t:
+        return "partial"
+    # skipped: N/A, 跳过
+    if any(k in t for k in ["n/a", "跳过", "skipped"]):
+        return "skipped"
+    # pending: 待执行 text, or solo ⏳ / ⬜ emoji
+    if any(k in t for k in ["待执行", "pending", "⏳", "⬜"]):
+        return "pending"
+    # solo − (dash)
+    if t.strip() == "−" or t.strip() == "-":
+        return "skipped"
+
+    return None
+
+
+# ─── artifact 详情读取（辅助，不影响状态判定）────────────
+
+def _file_size_mb(path: str) -> str:
+    if os.path.isfile(path):
+        return f"{os.path.getsize(path)/1024/1024:.1f} MB"
+    return ""
+
+def _file_size_kb(path: str) -> str:
+    if os.path.isfile(path):
+        return f"{os.path.getsize(path)/1024:.0f} KB"
+    return ""
+
+def _grep_first(path: str, pattern: str) -> str | None:
+    if not os.path.isfile(path):
+        return None
+    with open(path) as f:
+        for line in f:
+            m = re.search(pattern, line)
+            if m:
+                return m.group(1)
+    return None
+
+def _get_detail(task_dir: str, stage_name: str) -> str:
+    """根据阶段名从 artifact 中提取人类可读的详情字符串。"""
     if stage_name == "ACQUIRE":
         manifest = os.path.join(task_dir, "cache/acquire/manifest.json")
-        if os.path.exists(manifest):
+        if os.path.isfile(manifest):
             try:
                 with open(manifest) as f:
                     data = json.load(f)
-                    src = data.get("source", "")
-                    if len(src) > 40:
-                        src = src[:37] + "..."
-                    return f"来源: {src or '已获取'}"
+                src = data.get("source", "")
+                if len(src) > 42:
+                    src = src[:39] + "..."
+                return f"来源: {src}" if src else ""
             except Exception:
                 pass
-        return "已获取模型文件"
-    
+        return ""
+
     if stage_name == "EXPORT":
         onnx = os.path.join(task_dir, "export/model.onnx")
-        if os.path.exists(onnx):
-            size_mb = os.path.getsize(onnx) / 1024 / 1024
-            return f"ONNX: {size_mb:.1f} MB"
-        return ""
-    
+        return f"ONNX: {_file_size_mb(onnx)}" if os.path.isfile(onnx) else ""
+
+    if stage_name == "TOOLCHAIN":
+        # Pulsar2 状态
+        cmake = os.path.join(task_dir, "sdk/cpp/toolchain-aarch64.cmake")
+        return "工具链就绪" if os.path.isfile(cmake) else ""
+
     if stage_name == "COMPILE":
         axmodel = os.path.join(task_dir, "compile/model.axmodel")
-        if os.path.exists(axmodel):
-            size_kb = os.path.getsize(axmodel) / 1024
-            return f"AXMODEL: {size_kb:.0f} KB"
-        return ""
-    
+        report = os.path.join(task_dir, "compile/compile_report.md")
+        parts = []
+        if os.path.isfile(axmodel):
+            parts.append(f"AXMODEL: {_file_size_kb(axmodel)}")
+        m = _grep_first(report, r"MACs.*?(\d+\.?\d*)\s*G")
+        if m:
+            parts.append(f"MACs: {m} G")
+        return " / ".join(parts) if parts else ""
+
     if stage_name == "SIMULATE":
         report = os.path.join(task_dir, "simulate/simulate_report.md")
-        if os.path.exists(report):
-            with open(report) as f:
-                content = f.read()
-                m = re.search(r"cosine.*?(\d+\.\d+)", content)
-                if m:
-                    return f"cosine: {m.group(1)}"
-        return ""
-    
+        m = _grep_first(report, r"cosine.*?(\d+\.\d+)")
+        return f"cosine: {m}" if m else ""
+
     if stage_name == "SDK-GEN":
         return "Python/C++ SDK 已生成"
-    
+
     if stage_name == "RUNONBOARD":
         report = os.path.join(task_dir, "runonboard/runonboard_report.md")
-        if os.path.exists(report):
-            with open(report) as f:
-                content = f.read()
-                m = re.search(r"Python.*?(\d+\.?\d*)\s*ms", content)
-                if m:
-                    return f"延迟: {m.group(1)} ms"
-        return "板端验证完成"
-    
+        m = _grep_first(report, r"(Python|C\+\+).*?(\d+\.?\d*)\s*ms")
+        return f"延迟: {m} ms" if m else "板端验证完成"
+
     if stage_name == "PACKAGE":
-        pkg = os.path.join(task_dir, "package/README.md")
-        if os.path.exists(pkg):
-            # Count package files
-            count = 0
-            for root, _, files in os.walk(os.path.join(task_dir, "package")):
-                count += len(files)
+        pkg_dir = os.path.join(task_dir, "package")
+        if os.path.isdir(pkg_dir):
+            count = sum(len(files) for _, _, files in os.walk(pkg_dir))
             return f"交付包: {count} 个文件"
         return ""
-    
+
     return ""
 
+
+# ─── 主状态聚合 ─────────────────────────────────────
+
+def get_stage_statuses(task_dir: str) -> list[tuple[str, str, str, str]]:
+    """返回 [(stage_name, stage_desc, status, detail), ...]。
+
+    status ∈ {'completed', 'running', 'pending', 'skipped'}
+    权威来源: task.md 阶段状态表 > artifact 存在性 > 默认 pending
+    """
+    md_statuses = parse_task_md(task_dir)
+
+    results = []
+    for stage_name, stage_desc in STAGES:
+        # 1. task.md 有明确状态 → 以此为准
+        if stage_name in md_statuses:
+            status = md_statuses[stage_name]
+        else:
+            # 2. task.md 无该阶段 → 根据 artifact 推断（只判 completed，不判 running）
+            status = _infer_completed(task_dir, stage_name)
+
+        # 3. detail 总是从 artifact 读取
+        detail = _get_detail(task_dir, stage_name) if status in ("completed", "running") else ""
+
+        results.append((stage_name, stage_desc, status, detail))
+
+    return results
+
+
+def _infer_completed(task_dir: str, stage_name: str) -> str:
+    """当 task.md 无此阶段信息时，根据 artifact 推断是否已完成。
+
+    策略保守：只判 completed，不判 running。避免误报进行中。
+    因为 artifact 在阶段开始前可能就存在（重跑残留），不排除误判已完成。
+    但有 task.md 的任务不会走到这里。
+    """
+    checks = {
+        "ACQUIRE":    "cache/acquire/manifest.json",
+        "EXPORT":     "export/model.onnx",
+        "COMPILE":    "compile/model.axmodel",
+        "SIMULATE":   "simulate/simulate_report.md",
+        "SDK-GEN":    "sdk/sdk_report.md",
+        "RUNONBOARD": "runonboard/runonboard_report.md",
+        "PACKAGE":    "package/README.md",
+    }
+    if stage_name in checks:
+        path = os.path.join(task_dir, checks[stage_name])
+        return "completed" if os.path.isfile(path) and os.path.getsize(path) > 0 else "pending"
+    return "pending"
+
+
+# ─── Rich 布局 ──────────────────────────────────────
+
 def build_layout(task_dir: str) -> Layout:
-    """Build the rich layout for the dashboard."""
+    task_name = os.path.basename(task_dir.rstrip("/"))
+    statuses = get_stage_statuses(task_dir)
+
     layout = Layout()
     layout.split(
         Layout(name="header", size=3),
         Layout(name="body"),
         Layout(name="footer", size=3),
     )
-    
-    # Header
-    task_name = os.path.basename(task_dir.rstrip("/"))
-    header_text = Text(f"  Magnetar Pipeline — {task_name}", style="bold cyan")
-    layout["header"].update(Panel(header_text, box=box.ROUNDED))
-    
-    # Body: pipeline stages + metrics
+    layout["header"].update(Panel(
+        Text(f"  Magnetar Pipeline — {task_name}", style="bold cyan"),
+        box=box.ROUNDED,
+    ))
+
     layout["body"].split_row(
         Layout(name="stages", ratio=2),
         Layout(name="metrics", ratio=1),
     )
-    
-    # Stages
-    stages_table = _build_stages_table(task_dir)
-    layout["stages"].update(Panel(stages_table, title="流水线阶段", border_style="blue"))
-    
-    # Metrics
-    metrics_panel = _build_metrics_panel(task_dir)
-    layout["metrics"].update(Panel(metrics_panel, title="关键指标", border_style="green"))
-    
-    # Footer
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    footer_text = Text(f"  刷新: {now}  |  按 Ctrl+C 退出  |  TASK_DIR: {task_dir}", style="dim")
+    layout["stages"].update(Panel(
+        _build_stages_table(statuses),
+        title="流水线阶段",
+        border_style="blue",
+    ))
+    layout["metrics"].update(Panel(
+        _build_metrics_table(task_dir, statuses),
+        title="关键指标",
+        border_style="green",
+    ))
+
+    footer_text = Text(
+        f"  刷新: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}  |  "
+        f"按 Ctrl+C 退出  |  "
+        f"状态来源: {'task.md' if os.path.isfile(os.path.join(task_dir, 'task.md')) else 'artifact 推测'}  "
+        f"|  TASK_DIR: {task_dir}",
+        style="dim",
+    )
     layout["footer"].update(Panel(footer_text, box=box.ROUNDED))
-    
+
     return layout
 
-def _build_stages_table(task_dir: str) -> Table:
-    """Build the pipeline stages table."""
-    statuses = get_stage_statuses(task_dir)
-    
+
+def _build_stages_table(statuses: list) -> Table:
     table = Table(show_header=True, header_style="bold", box=box.SIMPLE)
     table.add_column("#", width=2, style="dim")
     table.add_column("阶段", width=12)
     table.add_column("状态", width=10)
-    table.add_column("详情", width=28)
-    
-    status_icons = {
+    table.add_column("详情", width=30)
+
+    icons_color = {
         "completed": ("✓", "green"),
-        "running": ("●", "yellow"),
-        "pending": ("○", "dim"),
-        "skipped": ("−", "dim"),
+        "running":   ("●", "yellow"),
+        "pending":   ("○", "dim"),
+        "skipped":   ("−", "dim"),
+        "partial":   ("⚠", "yellow"),
     }
-    
-    for i, (name, desc, status, detail) in enumerate(statuses, 1):
-        icon, color = status_icons.get(status, ("?", "dim"))
-        status_text = {
-            "completed": "完成",
-            "running": "进行中",
-            "pending": "等待",
-            "skipped": "跳过",
-        }.get(status, status)
-        
+    labels = {
+        "completed": "完成",
+        "running":   "进行中",
+        "pending":   "等待",
+        "skipped":   "跳过",
+        "partial":   "部分",
+    }
+
+    for i, (name, _desc, status, detail) in enumerate(statuses, 1):
+        icon, color = icons_color.get(status, ("?", "dim"))
+        label = labels.get(status, status)
         table.add_row(
             str(i),
             name,
-            f"[{color}]{icon} {status_text}[/{color}]",
+            f"[{color}]{icon} {label}[/{color}]",
             f"[{color}]{detail}[/{color}]" if detail else "",
         )
-    
     return table
 
-def _build_metrics_panel(task_dir: str) -> Table:
-    """Build key metrics summary."""
+
+def _build_metrics_table(task_dir: str, statuses: list) -> Table:
     table = Table(show_header=False, box=box.SIMPLE, padding=(0, 2))
     table.add_column("指标", style="dim")
     table.add_column("值", style="bold")
-    
-    # Model name
+
     task_name = os.path.basename(task_dir.rstrip("/"))
     table.add_row("任务", task_name)
-    
-    # ONNX size
-    onnx_path = os.path.join(task_dir, "export/model.onnx")
-    if os.path.exists(onnx_path):
-        table.add_row("ONNX", f"{os.path.getsize(onnx_path)/1024/1024:.1f} MB")
-    
-    # AXMODEL size
-    axmodel_path = os.path.join(task_dir, "compile/model.axmodel")
-    if os.path.exists(axmodel_path):
-        table.add_row("AXMODEL", f"{os.path.getsize(axmodel_path)/1024:.0f} KB")
-    
-    # Compression ratio
-    if os.path.exists(onnx_path) and os.path.exists(axmodel_path):
-        ratio = os.path.getsize(onnx_path) / max(os.path.getsize(axmodel_path), 1)
-        table.add_row("压缩比", f"{ratio:.1f}:1")
-    
-    # Accuracy
-    sim_path = os.path.join(task_dir, "simulate/simulate_report.md")
-    if os.path.exists(sim_path):
-        with open(sim_path) as f:
-            content = f.read()
-            m = re.search(r"cosine.*?(\d+\.\d+)\s*±\s*(\d+\.\d+)", content)
-            if m:
-                table.add_row("cosine", f"{m.group(1)} ± {m.group(2)}")
-            else:
-                m = re.search(r"cosine.*?(\d+\.\d+)", content)
-                if m:
-                    table.add_row("cosine", m.group(1))
-    
-    # MACs
-    compile_report = os.path.join(task_dir, "compile/compile_report.md")
-    if os.path.exists(compile_report):
-        with open(compile_report) as f:
-            content = f.read()
-            m = re.search(r"MACs.*?(\d+\.?\d*)\s*G", content)
-            if m:
-                table.add_row("MACs", f"{m.group(1)} G")
-    
-    # Board latency
-    board_report = os.path.join(task_dir, "runonboard/runonboard_report.md")
-    if os.path.exists(board_report):
-        with open(board_report) as f:
-            content = f.read()
-            for lang in ["Python", "C++"]:
-                m = re.search(rf"{lang}.*?(\d+\.?\d*)\s*ms", content)
-                if m:
-                    table.add_row(f"板端{lang}", f"{m.group(1)} ms")
-    
-    # Pipeline timing
+
+    stage_status = {sn: st for sn, _, st, _ in statuses}
+
+    def ok(sn): return stage_status.get(sn) == "completed"
+
+    if ok("EXPORT"):
+        p = os.path.join(task_dir, "export/model.onnx")
+        if os.path.isfile(p):
+            table.add_row("ONNX", f"{os.path.getsize(p)/1024/1024:.1f} MB")
+
+    if ok("COMPILE"):
+        ap = os.path.join(task_dir, "compile/model.axmodel")
+        onp = os.path.join(task_dir, "export/model.onnx")
+        if os.path.isfile(ap):
+            table.add_row("AXMODEL", f"{os.path.getsize(ap)/1024:.0f} KB")
+        if os.path.isfile(onp) and os.path.isfile(ap):
+            r = os.path.getsize(onp) / max(os.path.getsize(ap), 1)
+            table.add_row("压缩比", f"{r:.1f}:1")
+        m = _grep_first(os.path.join(task_dir, "compile/compile_report.md"), r"MACs.*?(\d+\.?\d*)\s*G")
+        if m:
+            table.add_row("MACs", f"{m} G")
+
+    if ok("SIMULATE"):
+        table.add_row("cosine", _grep_first(
+            os.path.join(task_dir, "simulate/simulate_report.md"),
+            r"cosine.*?(\d+\.\d+)",
+        ) or "N/A")
+
+    if ok("RUNONBOARD"):
+        rp = os.path.join(task_dir, "runonboard/runonboard_report.md")
+        for lang in ["Python", "C++"]:
+            v = _grep_first(rp, rf"{lang}.*?(\d+\.?\d*)\s*ms")
+            if v:
+                table.add_row(f"板端 {lang}", f"{v} ms")
+
+    # Pipeline timing from task.md
     task_md = os.path.join(task_dir, "task.md")
-    if os.path.exists(task_md):
-        with open(task_md) as f:
-            content = f.read()
-            m = re.search(r"总计.*?(\d+\.?\d*)\s*s", content)
-            if m:
-                table.add_row("总耗时", f"{float(m.group(1)):.0f} s")
-    
+    if os.path.isfile(task_md):
+        v = _grep_first(task_md, r"端到端.*?(\d+\.?\d*)\s*s")
+        if v:
+            table.add_row("总耗时", f"{float(v):.0f} s")
+
     return table
 
-def make_layout(task_dir: str) -> Layout:
-    """Layout factory for Live display."""
-    return build_layout(task_dir)
+
+# ─── CLI ───────────────────────────────────────────
 
 def main():
     parser = argparse.ArgumentParser(description="Magnetar 工作流 TUI 监控面板")
@@ -371,13 +421,13 @@ def main():
     parser.add_argument("--once", action="store_true", help="只输出一次，不持续刷新")
     parser.add_argument("--interval", type=float, default=2.0, help="刷新间隔（秒），默认 2s")
     args = parser.parse_args()
-    
+
     if not args.task_dir:
-        # Try to find the most recent task
         works_dir = os.path.join(os.getcwd(), "todos/work")
         if os.path.isdir(works_dir):
             dirs = sorted(
-                [d for d in os.listdir(works_dir) if os.path.isdir(os.path.join(works_dir, d))],
+                [d for d in os.listdir(works_dir)
+                 if os.path.isdir(os.path.join(works_dir, d))],
                 reverse=True,
             )
             if dirs:
@@ -389,15 +439,15 @@ def main():
         else:
             console.print("[red]未找到 todos/work/ 目录。请指定 TASK_DIR[/red]")
             sys.exit(1)
-    
+
     if not os.path.isdir(args.task_dir):
         console.print(f"[red]目录不存在: {args.task_dir}[/red]")
         sys.exit(1)
-    
+
     if args.once:
         console.print(build_layout(args.task_dir))
         return
-    
+
     try:
         with Live(build_layout(args.task_dir), refresh_per_second=1, screen=True) as live:
             while True:
@@ -405,6 +455,7 @@ def main():
                 live.update(build_layout(args.task_dir))
     except KeyboardInterrupt:
         console.print("\n[dim]监控已停止[/dim]")
+
 
 if __name__ == "__main__":
     main()
