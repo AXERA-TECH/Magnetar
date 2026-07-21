@@ -15,8 +15,11 @@ import argparse
 import json
 import os
 import re
+import select
 import sys
+import termios
 import time
+import tty
 from datetime import datetime
 
 from rich.console import Console
@@ -415,6 +418,60 @@ def _build_metrics_table(task_dir: str, statuses: list) -> Table:
 
 # ─── CLI ───────────────────────────────────────────
 
+def _list_tasks(works_dir: str) -> list[str]:
+    """返回 todos/work/ 下按时间倒序的任务目录绝对路径列表。"""
+    if not os.path.isdir(works_dir):
+        return []
+    return sorted(
+        [os.path.join(works_dir, d) for d in os.listdir(works_dir)
+         if os.path.isdir(os.path.join(works_dir, d))],
+        reverse=True,
+    )
+
+
+def _read_key(timeout: float = 0.2) -> str | None:
+    """非阻塞读取按键。处理普通键和方向键 escape 序列。
+
+    返回: 'q', 'n', 'p', '1'-'9', 'left', 'right', 或 None
+    """
+    if select.select([sys.stdin], [], [], timeout)[0]:
+        ch = sys.stdin.read(1)
+        if ch == '\x1b':
+            # Escape 序列：检查是否紧跟着方向键
+            if select.select([sys.stdin], [], [], 0.02)[0]:
+                seq = sys.stdin.read(2)
+                if seq == '[C':
+                    return 'right'
+                if seq == '[D':
+                    return 'left'
+            return 'esc'
+        return ch
+    return None
+
+
+def _build_footer(task_dir: str, all_tasks: list[str], task_idx: int) -> Panel:
+    """构建含任务切换提示的 footer。"""
+    total = len(all_tasks)
+    name = os.path.basename(task_dir.rstrip("/"))
+    source = "task.md" if os.path.isfile(os.path.join(task_dir, "task.md")) else "artifact 推测"
+    now = datetime.now().strftime("%H:%M:%S")
+
+    if total > 1:
+        hint = f"n/p/←/→:切换任务 1-{min(total,9)}:直达 q:退出"
+        parts = [
+            f"  {now}  │  任务 [{task_idx+1}/{total}] {name}  ",
+            f"│  状态来源: {source}  ",
+            f"│  {hint}  ",
+        ]
+    else:
+        parts = [
+            f"  {now}  │  任务 {name}  ",
+            f"│  状态来源: {source}  ",
+            f"│  q 退出  ",
+        ]
+    return Panel(Text("".join(parts), style="dim"), box=box.ROUNDED)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Magnetar 工作流 TUI 监控面板")
     parser.add_argument("task_dir", nargs="?", help="TASK_DIR 路径")
@@ -422,39 +479,70 @@ def main():
     parser.add_argument("--interval", type=float, default=2.0, help="刷新间隔（秒），默认 2s")
     args = parser.parse_args()
 
+    # 收集所有可用任务目录
+    works_dir = os.path.join(os.getcwd(), "todos/work")
+    all_tasks = _list_tasks(works_dir)
+
     if not args.task_dir:
-        works_dir = os.path.join(os.getcwd(), "todos/work")
-        if os.path.isdir(works_dir):
-            dirs = sorted(
-                [d for d in os.listdir(works_dir)
-                 if os.path.isdir(os.path.join(works_dir, d))],
-                reverse=True,
-            )
-            if dirs:
-                args.task_dir = os.path.join(works_dir, dirs[0])
-                console.print(f"[dim]自动选择最近任务: {args.task_dir}[/dim]")
-            else:
-                console.print("[red]未找到任务目录。用法: monitor.py <TASK_DIR>[/red]")
-                sys.exit(1)
+        if all_tasks:
+            args.task_dir = all_tasks[0]
+            console.print(f"[dim]自动选择最近任务: {args.task_dir}[/dim]")
         else:
-            console.print("[red]未找到 todos/work/ 目录。请指定 TASK_DIR[/red]")
+            console.print("[red]未找到任务目录。用法: monitor.py <TASK_DIR>[/red]")
             sys.exit(1)
 
     if not os.path.isdir(args.task_dir):
         console.print(f"[red]目录不存在: {args.task_dir}[/red]")
         sys.exit(1)
 
+    # 确定当前任务在列表中的索引
+    task_idx = all_tasks.index(args.task_dir) if args.task_dir in all_tasks else 0
+    if args.task_dir not in all_tasks:
+        all_tasks.insert(0, args.task_dir)
+
     if args.once:
         console.print(build_layout(args.task_dir))
         return
 
+    # 切换到 raw 模式以捕获按键
+    fd = sys.stdin.fileno()
+    old_attrs = termios.tcgetattr(fd)
+    tty.setraw(fd)
+
     try:
-        with Live(build_layout(args.task_dir), refresh_per_second=1, screen=True) as live:
+        current = args.task_dir
+        layout = build_layout(current)
+        # 替换 footer 为含切换提示的版本
+        layout["footer"].update(_build_footer(current, all_tasks, task_idx))
+
+        with Live(layout, refresh_per_second=1, screen=True) as live:
             while True:
-                time.sleep(args.interval)
-                live.update(build_layout(args.task_dir))
+                key = _read_key(timeout=args.interval)
+
+                if key is not None:
+                    if key in ("q", "Q", "esc"):
+                        break
+                    elif key in ("n", "N", "right"):
+                        task_idx = (task_idx + 1) % len(all_tasks)
+                        current = all_tasks[task_idx]
+                    elif key in ("p", "P", "left"):
+                        task_idx = (task_idx - 1) % len(all_tasks)
+                        current = all_tasks[task_idx]
+                    elif key.isdigit():
+                        n = int(key)
+                        if 1 <= n <= min(9, len(all_tasks)):
+                            task_idx = n - 1
+                            current = all_tasks[task_idx]
+
+                layout = build_layout(current)
+                layout["footer"].update(_build_footer(current, all_tasks, task_idx))
+                live.update(layout)
     except KeyboardInterrupt:
-        console.print("\n[dim]监控已停止[/dim]")
+        pass
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_attrs)
+
+    console.print("\n[dim]监控已停止[/dim]")
 
 
 if __name__ == "__main__":
