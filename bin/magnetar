@@ -217,12 +217,18 @@ cmd_install() {
 }
 
 cmd_monitor() {
-    local task_dir="${1:-}"
-    if [[ -z "$task_dir" ]]; then
-        if [[ -d "$PROJECT_ROOT/todos/work" ]]; then
-            task_dir=$(ls -1dt "$PROJECT_ROOT/todos/work"/*/ 2>/dev/null | head -1)
-            task_dir="${task_dir%/}"
+    local task_dir=""
+    local extra_args=()
+    for arg in "$@"; do
+        if [[ "$arg" == --* ]]; then
+            extra_args+=("$arg")
+        elif [[ -z "$task_dir" ]]; then
+            task_dir="$arg"
         fi
+    done
+    if [[ -z "$task_dir" ]] && [[ -d "$PROJECT_ROOT/todos/work" ]]; then
+        task_dir=$(ls -1dt "$PROJECT_ROOT/todos/work"/*/ 2>/dev/null | head -1)
+        task_dir="${task_dir%/}"
     fi
     if [[ -z "$task_dir" ]] || [[ ! -d "$task_dir" ]]; then
         echo -e "${YELLOW}未找到任务目录。用法: ./magnetar monitor <TASK_DIR>${NC}"
@@ -231,7 +237,7 @@ cmd_monitor() {
     echo -e "${CYAN}监控任务: $task_dir${NC}"
     echo "按 Ctrl+C 退出"
     sleep 1
-    exec python3 "$REPO_ROOT/scripts/monitor.py" "$task_dir"
+    exec python3 "$REPO_ROOT/scripts/monitor.py" "$task_dir" "${extra_args[@]}"
 }
 
 cmd_report() {

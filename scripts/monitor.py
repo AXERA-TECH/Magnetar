@@ -530,6 +530,7 @@ def main():
     parser.add_argument("task_dir", nargs="?", help="TASK_DIR 路径")
     parser.add_argument("--once", action="store_true", help="只输出一次，不持续刷新")
     parser.add_argument("--interval", type=float, default=2.0, help="刷新间隔（秒），默认 2s")
+    parser.add_argument("--no-live", action="store_true", help="不用 Rich Live，直接用 clear+print（兼容老旧终端）")
     args = parser.parse_args()
 
     # 收集所有可用任务目录
@@ -566,20 +567,21 @@ def main():
 
     try:
         current = args.task_dir
-        layout = build_layout(current)
-        # 替换 footer 为含切换提示的版本
-        layout["footer"].update(_build_footer(current, all_tasks, task_idx))
-
-        with Live(layout, refresh_per_second=1, screen=True) as live:
-            while True:
-                time.sleep(args.interval)
-
-                # 处理积压按键
+        if args.no_live:
+            while running:
+                console.clear()
+                layout = build_layout(current)
+                layout["footer"].update(_build_footer(current, all_tasks, task_idx))
+                console.print(layout)
+                for _ in range(int(args.interval * 10)):
+                    time.sleep(0.1)
+                    key = _get_key()
+                    if key is not None:
+                        break
                 key = _get_key()
                 while key is not None:
                     if key in ("q", "Q", "esc"):
                         running = False
-                        break
                     elif key in ("n", "N", "right"):
                         task_idx = (task_idx + 1) % len(all_tasks)
                         current = all_tasks[task_idx]
@@ -592,13 +594,36 @@ def main():
                             task_idx = n - 1
                             current = all_tasks[task_idx]
                     key = _get_key()
+        else:
+            layout = build_layout(current)
+            layout["footer"].update(_build_footer(current, all_tasks, task_idx))
 
-                layout = build_layout(current)
-                layout["footer"].update(_build_footer(current, all_tasks, task_idx))
-                live.update(layout)
+            with Live(layout, refresh_per_second=1, screen=False, transient=True) as live:
+                while running:
+                    time.sleep(args.interval)
 
-                if not running:
-                    break
+                    key = _get_key()
+                    while key is not None:
+                        if key in ("q", "Q", "esc"):
+                            running = False
+                            break
+                        elif key in ("n", "N", "right"):
+                            task_idx = (task_idx + 1) % len(all_tasks)
+                            current = all_tasks[task_idx]
+                        elif key in ("p", "P", "left"):
+                            task_idx = (task_idx - 1) % len(all_tasks)
+                            current = all_tasks[task_idx]
+                        elif key.isdigit():
+                            n = int(key)
+                            if 1 <= n <= min(9, len(all_tasks)):
+                                task_idx = n - 1
+                                current = all_tasks[task_idx]
+                        key = _get_key()
+
+                    layout = build_layout(current)
+                    layout["footer"].update(_build_footer(current, all_tasks, task_idx))
+                    live.update(layout)
+
     except KeyboardInterrupt:
         pass
     finally:
