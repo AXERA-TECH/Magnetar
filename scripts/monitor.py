@@ -14,10 +14,12 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import queue
 import re
 import select
 import sys
 import termios
+import threading
 import time
 import tty
 from datetime import datetime
@@ -423,6 +425,54 @@ def _build_metrics_table(task_dir: str, statuses: list) -> Table:
 
 # ─── CLI ───────────────────────────────────────────
 
+_KEY_QUEUE: queue.Queue = queue.Queue()
+
+
+def _start_input_listener():
+    """在 daemon 线程中监听 stdin 按键，通过队列发送给主线程。
+
+    raw 模式仅限于此线程内部，不影响 Rich 的主线程终端控制。
+    """
+    def _listen():
+        fd = sys.stdin.fileno()
+        try:
+            old = termios.tcgetattr(fd)
+            tty.setraw(fd)
+            try:
+                while True:
+                    if select.select([sys.stdin], [], [], 0.15)[0]:
+                        ch = sys.stdin.read(1)
+                        if ch == '\x1b':
+                            if select.select([sys.stdin], [], [], 0.01)[0]:
+                                seq = sys.stdin.read(2)
+                                if seq == '[C':
+                                    _KEY_QUEUE.put('right')
+                                    continue
+                                if seq == '[D':
+                                    _KEY_QUEUE.put('left')
+                                    continue
+                            _KEY_QUEUE.put('esc')
+                        else:
+                            _KEY_QUEUE.put(ch)
+            except (OSError, ValueError, EOFError):
+                pass
+            finally:
+                termios.tcsetattr(fd, termios.TCSADRAIN, old)
+        except termios.error:
+            pass  # 非 tty 环境，不支持按键监听
+
+    t = threading.Thread(target=_listen, daemon=True)
+    t.start()
+
+
+def _get_key() -> str | None:
+    """从按键队列非阻塞取一条。"""
+    try:
+        return _KEY_QUEUE.get_nowait()
+    except queue.Empty:
+        return None
+
+
 def _list_tasks(works_dir: str) -> list[str]:
     """返回 todos/work/ 下按时间倒序的任务目录绝对路径列表。"""
     if not os.path.isdir(works_dir):
@@ -434,32 +484,13 @@ def _list_tasks(works_dir: str) -> list[str]:
     )
 
 
-def _read_key(timeout: float = 0.2) -> str | None:
-    """非阻塞读取按键。处理普通键和方向键 escape 序列。
-
-    返回: 'q', 'n', 'p', '1'-'9', 'left', 'right', 或 None
-    """
-    if select.select([sys.stdin], [], [], timeout)[0]:
-        ch = sys.stdin.read(1)
-        if ch == '\x1b':
-            # Escape 序列：检查是否紧跟着方向键
-            if select.select([sys.stdin], [], [], 0.02)[0]:
-                seq = sys.stdin.read(2)
-                if seq == '[C':
-                    return 'right'
-                if seq == '[D':
-                    return 'left'
-            return 'esc'
-        return ch
-    return None
-
-
 def _build_footer(task_dir: str, all_tasks: list[str], task_idx: int) -> Panel:
     """构建含任务切换提示的 footer。"""
     total = len(all_tasks)
     name = os.path.basename(task_dir.rstrip("/"))
     source = "task.md" if os.path.isfile(os.path.join(task_dir, "task.md")) else "artifact 推测"
     now = datetime.now().strftime("%H:%M:%S")
+    running = True
 
     if total > 1:
         hint = f"n/p/←/→:切换任务 1-{min(total,9)}:直达 q:退出"
@@ -509,10 +540,8 @@ def main():
         console.print(build_layout(args.task_dir))
         return
 
-    # 切换到 raw 模式以捕获按键
-    fd = sys.stdin.fileno()
-    old_attrs = termios.tcgetattr(fd)
-    tty.setraw(fd)
+    # 启动后台按键监听线程
+    _start_input_listener()
 
     try:
         current = args.task_dir
@@ -522,10 +551,13 @@ def main():
 
         with Live(layout, refresh_per_second=1, screen=True) as live:
             while True:
-                key = _read_key(timeout=args.interval)
+                time.sleep(args.interval)
 
-                if key is not None:
+                # 处理积压按键
+                key = _get_key()
+                while key is not None:
                     if key in ("q", "Q", "esc"):
+                        running = False
                         break
                     elif key in ("n", "N", "right"):
                         task_idx = (task_idx + 1) % len(all_tasks)
@@ -538,14 +570,16 @@ def main():
                         if 1 <= n <= min(9, len(all_tasks)):
                             task_idx = n - 1
                             current = all_tasks[task_idx]
+                    key = _get_key()
 
                 layout = build_layout(current)
                 layout["footer"].update(_build_footer(current, all_tasks, task_idx))
                 live.update(layout)
+
+                if not running:
+                    break
     except KeyboardInterrupt:
         pass
-    finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, old_attrs)
 
     console.print("\n[dim]监控已停止[/dim]")
 
