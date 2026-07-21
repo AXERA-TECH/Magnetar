@@ -490,7 +490,6 @@ def _build_footer(task_dir: str, all_tasks: list[str], task_idx: int) -> Panel:
     name = os.path.basename(task_dir.rstrip("/"))
     source = "task.md" if os.path.isfile(os.path.join(task_dir, "task.md")) else "artifact 推测"
     now = datetime.now().strftime("%H:%M:%S")
-    running = True
 
     if total > 1:
         hint = f"n/p/←/→:切换任务 1-{min(total,9)}:直达 q:退出"
@@ -542,6 +541,7 @@ def main():
 
     # 启动后台按键监听线程
     _start_input_listener()
+    running = True
 
     try:
         current = args.task_dir
