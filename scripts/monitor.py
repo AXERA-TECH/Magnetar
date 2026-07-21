@@ -510,7 +510,7 @@ def _build_footer(task_dir: str, all_tasks: list[str], task_idx: int) -> Panel:
     now = datetime.now().strftime("%H:%M:%S")
 
     if total > 1:
-        hint = f"n/p/←/→:切换任务 1-{min(total,9)}:直达 q/Ctrl+C:退出"
+        hint = f"n/p:切换任务 1-{min(total,9)}:直达 q/Ctrl+C:退出"
         parts = [
             f"  {now}  │  任务 [{task_idx+1}/{total}] {name}  ",
             f"│  状态来源: {source}  ",
@@ -582,10 +582,10 @@ def main():
                 while key is not None:
                     if key in ("q", "Q"):
                         running = False
-                    elif key in ("n", "N", "right"):
+                    elif key in ("n", "N"):
                         task_idx = (task_idx + 1) % len(all_tasks)
                         current = all_tasks[task_idx]
-                    elif key in ("p", "P", "left"):
+                    elif key in ("p", "P"):
                         task_idx = (task_idx - 1) % len(all_tasks)
                         current = all_tasks[task_idx]
                     elif key.isdigit():
@@ -607,10 +607,10 @@ def main():
                         if key in ("q", "Q"):
                             running = False
                             break
-                        elif key in ("n", "N", "right"):
+                        elif key in ("n", "N"):
                             task_idx = (task_idx + 1) % len(all_tasks)
                             current = all_tasks[task_idx]
-                        elif key in ("p", "P", "left"):
+                        elif key in ("p", "P"):
                             task_idx = (task_idx - 1) % len(all_tasks)
                             current = all_tasks[task_idx]
                         elif key.isdigit():
