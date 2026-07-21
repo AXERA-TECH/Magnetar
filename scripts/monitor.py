@@ -331,11 +331,12 @@ def build_layout(task_dir: str) -> Layout:
 
 
 def _build_stages_table(statuses: list) -> Table:
-    table = Table(show_header=True, header_style="bold", box=box.SIMPLE)
+    table = Table(show_header=True, header_style="bold", box=box.SIMPLE,
+                  expand=False, collapse_padding=True, pad_edge=False)
     table.add_column("#", width=2, style="dim")
-    table.add_column("阶段", width=12)
-    table.add_column("状态", width=10)
-    table.add_column("详情", width=30)
+    table.add_column("阶段", width=12, no_wrap=True)
+    table.add_column("状态", width=10, no_wrap=True)
+    table.add_column("详情", width=30, no_wrap=True, overflow="ellipsis")
 
     icons_color = {
         "completed": ("✓", "green"),
@@ -355,6 +356,9 @@ def _build_stages_table(statuses: list) -> Table:
     for i, (name, _desc, status, detail) in enumerate(statuses, 1):
         icon, color = icons_color.get(status, ("?", "dim"))
         label = labels.get(status, status)
+        # 短 detail，防止换行导致行高抖动
+        if len(detail) > 28:
+            detail = detail[:25] + "..."
         table.add_row(
             str(i),
             name,
@@ -365,9 +369,10 @@ def _build_stages_table(statuses: list) -> Table:
 
 
 def _build_metrics_table(task_dir: str, statuses: list) -> Table:
-    table = Table(show_header=False, box=box.SIMPLE, padding=(0, 2))
-    table.add_column("指标", style="dim")
-    table.add_column("值", style="bold")
+    table = Table(show_header=False, box=box.SIMPLE, padding=(0, 2),
+                  expand=False, collapse_padding=True)
+    table.add_column("指标", style="dim", width=10, no_wrap=True)
+    table.add_column("值", style="bold", width=20, no_wrap=True, overflow="ellipsis")
 
     task_name = os.path.basename(task_dir.rstrip("/"))
     table.add_row("任务", task_name)
