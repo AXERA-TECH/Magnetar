@@ -12,7 +12,7 @@ description: Convert remote or local AI models into AXera AXMODEL packages with 
 按顺序推进 9 阶段，每阶段读取对应 `hidden/<stage>/SKILL.md`：
 
 ```
-INIT → ACQUIRE → EXPORT → TOOLCHAIN → COMPILE → SIMULATE → SDK-GEN → RUNONBOARD → PACKAGE
+ACQUIRE → INIT → EXPORT → TOOLCHAIN → COMPILE → SIMULATE → SDK-GEN → RUNONBOARD → PACKAGE
 ```
 
 - 各阶段优先调用 `magnetar/stages/*.py` 工具函数
