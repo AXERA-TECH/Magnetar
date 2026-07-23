@@ -65,7 +65,7 @@ RUNONBOARD 阶段的行为取决于 `BOARD` 是否提供：
 - **提供了 BOARD**：RUNONBOARD 正常执行，在板端验证模型精度、延迟和内存。
 - **未提供 BOARD**：RUNONBOARD 自动跳过，`runonboard_report.md` 标记各指标为 N/A，`performance_report.md` 中板端相关数据标注为 N/A。交付包仍然完整可用。
 
-机器可读规范见 [../../workflows/magnetar.yaml](../../workflows/magnetar.yaml)。
+机器可读规范见 [../../../workflows/magnetar.yaml](../../workflows/magnetar.yaml)。
 
 ### 断点恢复
 
