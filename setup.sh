@@ -53,7 +53,20 @@ echo -e "${CYAN}=== Magnetar 环境依赖检查 ===${NC}"
 echo ""
 DEPS_OK=0
 check_dep git || DEPS_OK=1
-check_dep python3 "apt install python3" || DEPS_OK=1
+if command -v python3 &>/dev/null; then
+    py_ver=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+    py_major=$(echo "$py_ver" | cut -d. -f1)
+    py_minor=$(echo "$py_ver" | cut -d. -f2)
+    if [ "$py_major" -eq 3 ] && [ "$py_minor" -ge 10 ] && [ "$py_minor" -le 13 ]; then
+        echo -e "  ${GREEN}✓${NC} python3 $py_ver"
+    else
+        echo -e "  ${RED}✗${NC} python3 $py_ver — 需要 3.10-3.13（3.14 无 onnxruntime wheels）"
+        DEPS_OK=1
+    fi
+else
+    echo -e "  ${RED}✗${NC} python3 — 未找到 安装: apt install python3"
+    DEPS_OK=1
+fi
 check_dep uv "curl -LsSf https://astral.sh/uv/install.sh | sh" || DEPS_OK=1
 check_docker || DEPS_OK=1
 check_dep cmake "apt install cmake" || DEPS_OK=1
