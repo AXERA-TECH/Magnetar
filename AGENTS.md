@@ -1,74 +1,120 @@
 # AGENTS.md
 
-本仓库包含 Magnetar 模型部署工作流。所有 Codex 回复默认使用中文。
+本仓库包含 Magnetar 模型部署工具。所有 Agent 回复默认使用中文。
 
 ## 项目目标
 
-Magnetar 用于辅助完成从远程或本地浮点模型到 AX 芯片客户交付包的部署流程：
+将远程或本地浮点模型转换为 AX 芯片客户交付包：
 
-`远程/本地模型 -> ONNX -> Pulsar2 编译 -> AXMODEL -> 仿真验证 -> Python/C++ SDK -> 客户交付包`
+`模型 → ONNX → Pulsar2 编译 → AXMODEL → 仿真验证 → Python/C++ SDK → 交付包`
 
-## Codex 工作流
+## 工具库
 
-当用户要求部署、导出、编译、仿真、上板、调试 Pulsar2/AXModel，或要求运行 Magnetar 工作流时，优先使用本仓库的 Codex skill：
+Agent 负责编排和决策。`magnetar/stages/*.py` 提供确定性执行函数：
 
-`.codex/skills/magnetar/SKILL.md`
+| 模块 | 函数 | 用途 |
+|------|------|------|
+| `magnetar.config` | `load_config()` | 读取 `.magnetarrc` + 环境变量 |
+| `magnetar.docker_util` | `latest_pulsar2_image()`, `docker_pulsar2()` | Docker/Pulsar2 封装 |
+| `magnetar.board_util` | `select_board()`, `ssh()`, `scp_to()`, `scp_from()` | AX 板端操作 |
+| `magnetar.stages.init` | `run(config)` → `task_dir` | 创建 TASK_DIR 结构 |
+| `magnetar.stages.acquire` | `run(task_dir, source)` | 获取模型到 origin/ |
+| `magnetar.stages.export` | `run_mobilenet(task_dir)` → `sample` | MobileNet ONNX 导出+验证+校准 |
+| `magnetar.stages.toolchain` | `run()` → `pulsar_image` | 验证 Pulsar2 Docker 可用 |
+| `magnetar.stages.compile` | `run(task_dir, target_hw, image)` | Pulsar2 编译 AXMODEL |
+| `magnetar.stages.simulate` | `run(task_dir, sample, image)` → `metrics` | ONNX vs AXMODEL 精度对分 |
+| `magnetar.stages.sdk_gen` | `run_mobilenet_python()`, `run_mobilenet_cpp()` | 生成 Python/C++ SDK |
+| `magnetar.stages.runonboard` | `run(task_dir, sample, hw, pwd)` → `metrics` | 板端部署验证 |
+| `magnetar.stages.package` | `assemble(task_dir, metrics, image)` → `pkg` | 组装交付包 |
 
-如果 skill 未被自动发现，先读取该文件，再按其中流程执行。
+非 MobileNet 模型：Agent 需自行实现 ONNX 导出逻辑并正确填写 `model_meta.json`。
 
-## 强制约束
+## 执行流程
 
-- 必须按 `ACQUIRE -> INIT -> EXPORT -> TOOLCHAIN -> COMPILE -> SIMULATE -> SDK-GEN -> RUNONBOARD -> PACKAGE` 顺序推进。
-- `RUNONBOARD` 阶段：若用户提供了 `BOARD`，正常执行板端验证；若未提供，自动跳过并在报告中标注 N/A。
-- 遇到流程中标记为 `STOP` 的位置，必须暂停并等待用户确认或补充输入。
-- 所有执行过程、关键命令、产物路径、错误分析必须记录到任务工作目录内的 `task.md` 和 `analysis.md`。
-- 不得污染原始模型工程。调试脚本、中间文件、导出模型、编译缓存等必须写入任务工作目录。
-- 调试中遇到并解决的问题，应在仓库 `issues/` 下新增记录，命名格式为 `序号_模型名_阶段_问题简述.md`。
-- 不要在提交信息或用户可见产物中提及 AI 身份。
+严格按以下顺序推进 9 阶段，不可跳过：
+
+```
+1. INIT      → magnetar.stages.init.run(config)
+2. ACQUIRE   → magnetar.stages.acquire.run(task_dir, source)
+3. EXPORT    → 模型特定导出 + 生成 model_meta.json + 校准数据
+4. TOOLCHAIN → magnetar.stages.toolchain.run()
+5. COMPILE   → magnetar.stages.compile.run(task_dir, target_hw, image)
+6. SIMULATE  → metrics = simulate.run(task_dir, sample, image)
+7. SDK-GEN   → 生成 Python/C++ SDK
+8. RUNONBOARD→ 若 BOARD 已配置则执行，否则跳过
+9. PACKAGE   → magnetar.stages.package.assemble(task_dir, metrics, image)
+```
+
+每阶段完成后更新 `TASK_DIR/task.md` 和 `analysis.md`。
+
+## STOP 点
+
+必须暂停并等待用户确认：
+
+- `SOURCE`、`TARGET_HARDWARE` 未提供
+- 主模型文件或导出入口无法自动判断
+- ONNX 与原模型对分失败（cosine < 0.99）
+- Pulsar2 不可用
+- 编译失败需要修改模型图
+- SIMULATE 精度不达标（先查 `issues/` 目录）
+- 需要私有凭据
+
+BOARD 缺失不是 STOP——自动跳过 RUNONBOARD。
+
+## 配置
+
+优先读取仓库根目录 `.magnetarrc`（shell 风格 key=value），环境变量可覆盖。
+
+```bash
+SOURCE=<模型路径/URL>          # 必填
+TARGET_HARDWARE=AX650          # AX650 | AX620E
+BOARD=root@192.168.1.100       # 可选，不填跳过板端验证
+BOARD_PASSWORD=123456          # 板端密码
+SDK_LANG=both                  # python | cpp | both
+MODE=full                      # full | dry-run
+```
+
+详见 `.magnetarrc.example`。
 
 ## 目录约定
 
-默认任务目录为 `todos/work/<timestamp>-<model-name>/`，结构如下：
+默认任务目录 `todos/work/<timestamp>-<model-name>/`：
 
-```text
-TASK_DIR/
-  origin/       # 原始模型工程或模型文件
-  export/       # 导出脚本、ONNX 验证脚本、校准集生成脚本
-  compile/      # Pulsar2 配置和编译产物
-  simulate/     # ONNX 与 AXMODEL 仿真对分
-  sdk/python/   # Python SDK
-  sdk/cpp/      # C++ SDK + toolchain-aarch64.cmake
-  runonboard/   # 板端验证文件
-  package/      # 客户交付 git 项目根目录
-  cache/        # 跨阶段中间文件和临时调试文件
-  task.md
-  analysis.md
 ```
+TASK_DIR/
+  origin/       # 原始模型
+  export/       # ONNX + model_meta.json + 校准数据
+  compile/      # Pulsar2 配置 + model.axmodel
+  simulate/     # 精度对分报告
+  sdk/python/   # Python SDK
+  sdk/cpp/      # C++ SDK
+  runonboard/   # 板端验证
+  package/      # 客户交付包
+  cache/        # 跨阶段中间文件
+  task.md       # 任务记录
+  analysis.md   # 分析记录
+```
+
+产物不得污染原始模型工程。中间文件写入 TASK_DIR。
 
 ## 验证期望
 
-- EXPORT 阶段必须优先使用真实输入数据；没有真实数据时，应在 STOP 点向用户确认随机数据、用户提供路径、或可下载数据源。
-- ONNX 导出必须生成可复现脚本，并进行 Torch/ONNX 或原始模型/ONNX 对分。
-- Pulsar2 配置必须明确输入 shape、输入 dtype、layout、mean/std 与推理预处理的一致性。
-- 禁止开启 `"highest_mix_precision": true`。
-- 精度验证优先使用任务相关指标，例如分类模型的 cosine similarity、Top-k、平均绝对误差；不要只依赖相对误差。
-- Python SDK 必须通过 import 检查，并使用 `pyaxengine` 的 `AxEngineExecutionProvider` 作为默认 provider。
-- C++ SDK 必须至少通过 CMake configure；存在 aarch64 工具链时执行交叉编译验证，并直接链接 AX Engine runtime。
-- `ax_run_model` 只用于 AXMODEL smoke check，不得作为 Python/C++ SDK 的实现或验证替代。
-- PACKAGE 阶段必须生成可独立作为 git 项目发布的目录，顶层包含 `python/`、`cpp/`、`models/`、`model_convert/` 和 `README.md`。
+- ONNX 导出必须生成可复现脚本，Torch/ONNX 对分
+- Pulsar2 配置 `highest_mix_precision` 必须为 false
+- 精度验证：cosine ≥ 0.99，MAE 等任务相关指标
+- Python SDK import 检查通过，用 `pyaxengine.AxEngineExecutionProvider`
+- C++ SDK cmake configure 通过
+- `ax_run_model` 只用于 smoke check，不能替代 SDK 验证
+- PACKAGE 产出独立 git 项目目录
 
 ## 爱芯开发知识
 
-- pulsar2镜像: https://hf-mirror.com/AXERA-TECH/Pulsar2
-- pulsar2文档: https://pulsar2-docs.readthedocs.io/zh-cn/latest/
-- 爱芯HF模型: https://hf-mirror.com/AXERA-TECH
-- C++ BSP / 交叉编译器:
-  - AX650 BSP SDK (含交叉编译器 + AX runtime头文件和库):
-    下载: https://hf-mirror.com/AXERA-TECH/AX650-Community-Hub/resolve/main/sdk/edge-computing-AX650_SDK_V3.10.2/02.%20SDK/AX650_SDK_V3.10.2/AX650_SDK_V3.10.2_20260513151335.tgz
-    HF页面: https://hf-mirror.com/AXERA-TECH/AX650-Community-Hub/tree/main/sdk/edge-computing-AX650_SDK_V3.10.2/02.%20SDK/AX650_SDK_V3.10.2
-  - AX620E (待更新，暂用 Arm GNU 裸工具链):
-    https://developer.arm.com/-/media/Files/downloads/gnu-a/9.2-2019.12/binrel/gcc-arm-9.2-2019.12-x86_64-aarch64-none-linux-gnu.tar.xz
-- 爱芯开源Github repos: https://github.com/AXERA-TECH
-- 本机的docker镜像可能已安装pulsar2，应优先使用最新版本
-- 如果需要上板运行，可用remote-infer SKILL完成
-- LLM编译: https://github.com/AXERA-TECH/ax-llm
+- Pulsar2 镜像: https://hf-mirror.com/AXERA-TECH/Pulsar2
+- Pulsar2 文档: https://pulsar2-docs.readthedocs.io/zh-cn/latest/
+- 爱芯 HF 模型: https://hf-mirror.com/AXERA-TECH
+- 爱芯 GitHub: https://github.com/AXERA-TECH
+- AX650 BSP SDK: https://hf-mirror.com/AXERA-TECH/AX650-Community-Hub
+- 本机 Docker 可能已安装 Pulsar2，优先使用最新版本
+- 上板运行可用 `remote-infer` skill（若在 Codex 中）
+- LLM 编译: https://github.com/AXERA-TECH/ax-llm
+- 调试问题记录到 `issues/` 下，命名 `序号_模型名_阶段_问题简述.md`

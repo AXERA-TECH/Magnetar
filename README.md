@@ -6,7 +6,7 @@
 
 ## 快速开始
 
-**环境**：Linux x86_64，Python 3.8+，Git，Docker，CMake 3.15+。
+**环境**：Linux x86_64，Python 3.10+，Git，Docker，CMake 3.15+。
 
 ```bash
 git clone https://github.com/AXERA-TECH/Magnetar.git
@@ -15,21 +15,24 @@ cd Magnetar
 ./scripts/install_pulsar2.sh         # Pulsar2 Docker 镜像 (~3 GB)
 ```
 
-重启 Codex，然后在 Codex 中输入：
+### 通过 AI Agent 使用
+
+支持 **Codex**、**Claude Code**、**OpenCode** 等任意 Agent。在 Agent 中输入：
 
 ```
-$magnetar
-SOURCE=https://github.com/ultralytics/assets/releases/download/v8.3.0/yolov8n.pt
-TARGET_HARDWARE=AX650
+使用 magnetar，把 SOURCE=https://github.com/ultralytics/assets/releases/download/v8.3.0/yolov8n.pt
+转换到 AX650
 ```
 
-9 个阶段自动推进。没有 AX 板子？不传 `BOARD` 即可，板端验证自动跳过，交付包仍然完整。
+Agent 会读取 `AGENTS.md`（所有 Agent 的统一入口），按 9 阶段自动推进。
 
 不想每次手输参数？创建配置文件固化：
 
 ```bash
 cp .magnetarrc.example .magnetarrc
 ```
+
+没有 AX 板子？不传 `BOARD`，板端验证自动跳过，交付包仍然完整。
 
 ### 交付包产出
 
@@ -45,7 +48,7 @@ package/
 
 ### Dry-Run 预览
 
-只想看计划不执行？`.magnetarrc` 中设 `MODE=dry-run`，只扫描不下载不编译。
+`.magnetarrc` 中设 `MODE=dry-run`，只扫描不下载不编译。
 
 ## 配置 (.magnetarrc)
 
@@ -55,7 +58,6 @@ BOARD=root@192.168.1.100           # 可选，不填跳过板端验证
 BOARD_PASSWORD=123456              # 板端密码
 SDK_LANG=both                      # python | cpp | both
 AUTO_APPROVE=false                 # true = 全自动，不暂停
-PULSAR2_IMAGE=pulsar2:6.0          # 可选，自定义 Pulsar2 镜像
 ```
 
 完整说明见 `.magnetarrc.example`。
@@ -90,6 +92,18 @@ PULSAR2_IMAGE=pulsar2:6.0          # 可选，自定义 Pulsar2 镜像
 ./bin/magnetar monitor              # TUI 实时流水线
 ./bin/magnetar report               # 生成 HTML 仪表盘
 ```
+
+## Agent 兼容
+
+`AGENTS.md` 是所有 AI Agent 的统一工作流入口：
+
+| Agent | 入口文件 | 说明 |
+|-------|----------|------|
+| Codex | `AGENTS.md` + `.codex/skills/magnetar/SKILL.md` | SKILL.md 委托到 AGENTS.md |
+| Claude Code | `CLAUDE.md` → `AGENTS.md` 符号链接 | 直接读取 |
+| OpenCode | `AGENTS.md` | 直接读取 |
+
+工具函数位于 `magnetar/stages/*.py`，Agent 负责编排决策，函数负责确定性执行。
 
 ## 工具链
 
