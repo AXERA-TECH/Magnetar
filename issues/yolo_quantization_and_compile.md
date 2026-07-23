@@ -128,3 +128,45 @@ Cast(a, float) → Div(float, float) → Floor → Mul(float, float) → Sub(flo
 
 - 原始 ONNX: export/model.onnx
 - 修改脚本: export/fix_mod.py
+
+---
+
+# YOLOv8 110-Class 部署补充踩坑 (2026-07-23)
+
+## 1. Concat 不在 U16 白名单
+
+**现象**：`output_cls` 量化配置 `bit_width=16` 但实际输出仅 340 个唯一值（≈U8），cls 精度崩溃。
+
+**根因**：cls 路径经过 `Concat`（三检测层拼接）。`layer_configs` 只设了 `["Conv","Mul","Add"]` 的 U16，Concat 输出降级 U8 并向上游 OVERLAPPED。
+
+**解决**：`layer_configs.op_types` 加 `"Concat"`。
+
+## 2. calib_data dtype 不匹配
+
+**现象**：Pulsar2 报 `dtype(uint8) != float32`。
+
+**根因**：`input_processor` 的 U8→float 转换仅运行时生效，校准阶段直接喂 ONNX。
+
+**解决**：校准 `.npy` 保存为 float32 [0,1]。
+
+## 3. 板端对比脚本假匹配
+
+**现象**：30/30 "匹配"但 NPU 图片无框。
+
+**根因**：`paramiko.exec_command()` 异步，未等 NPU 推理完成就读 `.npz`，全读到同一份过期数据。
+
+**解决**：`stdout.channel.recv_exit_status()` 显式等待。
+
+## 4. 板端 opencv 安装
+
+**现象**：`pip install opencv-python` 报 `libxcb.so.1` 缺失。
+
+**根因**：AX650 Buildroot headless，无 X11。
+
+**解决**：`pip3 install opencv-python-headless`。
+
+## 5. C++ 交叉编译工具链
+
+**现象**：`developer.arm.com` 下载 GCC 极慢。
+
+**方案**：本地 `g++ -std=c++14 -Wall` 语法验证（0 error 0 warning），真正交叉编译等 `build_ax650.sh` 自动下 BSP。

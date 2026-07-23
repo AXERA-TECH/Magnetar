@@ -4,8 +4,9 @@ from datetime import datetime
 from pathlib import Path
 
 def run(config: dict) -> Path:
-    task_dir = Path(config.get("TASK_DIR") or "")
-    if not str(task_dir):
+    task_dir_str = config.get("TASK_DIR") or ""
+    task_dir = Path(task_dir_str)
+    if not task_dir_str:
         mn = config.get("MODEL_NAME") or "model"
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         task_dir = Path.cwd() / "todos" / "work" / f"{ts}-{mn}"

@@ -30,9 +30,10 @@ def run(task_dir: Path, sample: np.ndarray, pulsar_image: str,
             return metrics
         except Exception as e:
             (sd / "board_fast_failed.log").write_text(str(e), encoding="utf-8")
+            print(f"[SIMULATE] Board fast path failed: {e}, falling back to pulsar2 run")
 
     # 3. 回退 Pulsar2 仿真
-    return _run_pulsar2(task_dir, sample, onnx_out, pulsar_image, sd, output_name)
+    return _run_pulsar2(task_dir, sample, onnx_out, pulsar_image, sd, input_name, output_name)
 
 
 def _run_on_board(task_dir: Path, sample: np.ndarray, onnx_out: np.ndarray,
@@ -80,13 +81,13 @@ def _run_on_board(task_dir: Path, sample: np.ndarray, onnx_out: np.ndarray,
 
 
 def _run_pulsar2(task_dir: Path, sample: np.ndarray, onnx_out: np.ndarray,
-                 pulsar_image: str, sd: Path, output_name: str) -> dict:
+                 pulsar_image: str, sd: Path, input_name: str, output_name: str) -> dict:
     """Pulsar2 Docker 仿真（慢速回退）。"""
     from magnetar.docker_util import docker_pulsar2
     ind = sd / "input"; outd = sd / "output"
     ind.mkdir(parents=True, exist_ok=True); outd.mkdir(parents=True, exist_ok=True)
-    sample.astype(np.float32).tofile(ind / "input.bin")
-    log = docker_pulsar2(pulsar_image, str(task_dir),
+    sample.astype(np.float32).tofile(ind / f"{input_name}.bin")
+    log = docker_pulsar2(pulsar_image, str(task_dir.resolve()),
         "pulsar2 run --model /workspace/compile/model.axmodel "
         "--input_dir /workspace/simulate/input --output_dir /workspace/simulate/output",
         timeout=900)

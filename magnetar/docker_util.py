@@ -30,3 +30,34 @@ def make_writable(task_dir: str):
     img = latest_pulsar2_image()
     uid, gid = os.getuid(), os.getgid()
     run(["docker", "run", "--rm", "-v", f"{task_dir}:/workspace", img, "-lc", f"chown -R {uid}:{gid} /workspace"], timeout=120)
+
+def get_pulsar2_proto_enums(image: str) -> dict:
+    """从 Pulsar2 Docker 镜像读取 common.proto，解析所有枚举定义。
+
+    Returns:
+        {"DataType": {"U8": 1, "FP32": 10, ...}, "ColorSpace": {...}, ...}
+    """
+    raw = run(["docker", "run", "--rm", "--entrypoint", "cat", image,
+               "/opt/pulsar2/yamain/config/common.proto"], timeout=30)
+    enums: dict[str, dict[str, int]] = {}
+    current = None
+    for line in raw.splitlines():
+        m = re.match(r'^enum\s+(\w+)\s*\{', line)
+        if m:
+            current = m.group(1)
+            enums[current] = {}
+            continue
+        m = re.match(r'^\s+(\w+)\s*=\s*(\d+)\s*;', line)
+        if m and current:
+            enums[current][m.group(1)] = int(m.group(2))
+        if line.strip() == '}' and current:
+            current = None
+    return enums
+
+# 缓存 proto 枚举，避免重复拉取
+_proto_cache: dict[str, dict] = {}
+
+def get_pulsar2_proto_enums_cached(image: str) -> dict:
+    if image not in _proto_cache:
+        _proto_cache[image] = get_pulsar2_proto_enums(image)
+    return _proto_cache[image]
