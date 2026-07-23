@@ -26,8 +26,7 @@ magnetar — AI 模型到 AX 芯片一键部署 CLI
   status     查看最近一次任务的状态
   monitor    实时 TUI 监控面板，展示流水线进度和关键指标
   report     生成自包含 HTML 仪表盘报告
-  run        输出 Codex 提示（Codex 内）/ 直接执行 pipeline（CLI）
-  exec       直接执行 pipeline（MobileNet 等）
+  run        输出 Codex 启动提示，开始模型部署
   dry-run    预览模式：扫描模型、输出计划，不执行实际转换
   install    安装 Pulsar2 Docker 编译环境
   help       显示本帮助
@@ -169,33 +168,34 @@ cmd_status() {
 }
 
 cmd_run() {
-    if [[ -n "${CODEX_HOME:-}" ]] || [[ -n "${CODEX_SESSION_ID:-}" ]]; then
-        echo ""
-        echo -e "${GREEN}在 Codex 中运行以下命令:${NC}"
-        echo ""
-        local rc="$PROJECT_ROOT/.magnetarrc"
-        if [[ -f "$rc" ]]; then
-            source "$rc" 2>/dev/null || true
-            if [[ -n "${SOURCE:-}" ]] && [[ -n "${TARGET_HARDWARE:-}" ]]; then
-                echo "  \$magnetar"
-                echo ""
-                echo "已从 .magnetarrc 读取配置。"
-            else
-                echo "  \$magnetar"
-                echo "  SOURCE=<你的模型路径>"
-                echo "  TARGET_HARDWARE=AX650"
-            fi
+    echo ""
+    echo -e "${GREEN}在 Codex 中运行以下命令:${NC}"
+    echo ""
+    local rc="$PROJECT_ROOT/.magnetarrc"
+    if [[ -f "$rc" ]]; then
+        source "$rc" 2>/dev/null || true
+        if [[ -n "${SOURCE:-}" ]] && [[ -n "${TARGET_HARDWARE:-}" ]]; then
+            echo "  \$magnetar"
+            echo ""
+            echo "已从 .magnetarrc 读取配置:"
+            echo "  SOURCE=$SOURCE"
+            echo "  TARGET_HARDWARE=$TARGET_HARDWARE"
+            echo "  BOARD=${BOARD:-(跳过板端验证)}"
         else
             echo "  \$magnetar"
-            echo "  SOURCE=<模型路径/Git URL/HuggingFace repo>"
+            echo "  SOURCE=<你的模型路径>"
             echo "  TARGET_HARDWARE=AX650"
         fi
-        echo ""
     else
-        echo -e "${CYAN}Direct execution mode.${NC}"
-        cmd_exec "$@"
+        echo "  \$magnetar"
+        echo "  SOURCE=<模型路径/Git URL/HuggingFace repo>"
+        echo "  TARGET_HARDWARE=AX650"
+        echo ""
+        echo "或先运行 './magnetar init' 创建配置文件。"
     fi
+    echo ""
 }
+
 cmd_dry_run() {
     echo ""
     echo -e "${CYAN}在 Codex 中运行以下命令:${NC}"
@@ -205,15 +205,6 @@ cmd_dry_run() {
     echo "这将扫描模型文件、检查环境依赖、输出执行计划，"
     echo "但不会下载大文件（BSP SDK、Docker 镜像）也不会编译。"
     echo ""
-}
-
-
-cmd_exec() {
-    echo -e "${CYAN}=== Magnetar Pipeline ===${NC}"
-    echo ""
-    echo "TASK_DIR: ${PROJECT_ROOT}/todos/work/<ts>-<model>/"
-    echo ""
-    python3 -m magnetar.pipeline "$@"
 }
 
 cmd_install() {
@@ -276,7 +267,6 @@ case "$cmd" in
     monitor)    shift; cmd_monitor "$@" ;;
     report)     shift; cmd_report "$@" ;;
     run)        cmd_run ;;
-    exec)       shift; cmd_exec "$@" ;;
     dry-run)    cmd_dry_run ;;
     install)    cmd_install ;;
     help|--help|-h) usage ;;
