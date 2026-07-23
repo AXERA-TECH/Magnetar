@@ -6,7 +6,7 @@
 
 ## 快速开始
 
-**环境**：Linux x86_64，Python 3.8+，Git，Docker，CMake 3.15+。
+**环境**：Linux x86_64，Python 3.10+，Git，Docker，CMake 3.15+。
 
 ```bash
 git clone https://github.com/AXERA-TECH/Magnetar.git
@@ -15,21 +15,30 @@ cd Magnetar
 ./scripts/install_pulsar2.sh         # Pulsar2 Docker 镜像 (~3 GB)
 ```
 
-重启 Codex，然后在 Codex 中输入：
+### 方式一：CLI 直接执行（推荐）
 
-```
-$magnetar
-SOURCE=https://github.com/ultralytics/assets/releases/download/v8.3.0/yolov8n.pt
-TARGET_HARDWARE=AX650
+```bash
+./bin/magnetar exec mobilenet        # MobileNetV2 一跑到底
 ```
 
-9 个阶段自动推进。没有 AX 板子？不传 `BOARD` 即可，板端验证自动跳过，交付包仍然完整。
-
-不想每次手输参数？创建配置文件固化：
+配置固化到 `.magnetarrc`，板端可选：
 
 ```bash
 cp .magnetarrc.example .magnetarrc
+# 编辑填入 TARGET_HARDWARE、BOARD 等
+./bin/magnetar exec mobilenet        # 读取 .magnetarrc 自动执行
 ```
+
+### 方式二：AI Agent 驱动
+
+支持 Codex、Claude、OpenCode 等任意 agent。在 agent 中输入：
+
+```
+使用 magnetar，把 SOURCE=https://github.com/ultralytics/assets/releases/download/v8.3.0/yolov8n.pt
+转换到 AX650
+```
+
+agent 会调用 `./bin/magnetar exec` 执行 pipeline，或按阶段手动推进。
 
 ### 交付包产出
 
@@ -43,9 +52,24 @@ package/
 └── reports/            # 性能 + 精度报告
 ```
 
+没有 AX 板子？不传 `BOARD`，板端验证自动跳过，交付包仍然完整。
+
 ### Dry-Run 预览
 
-只想看计划不执行？`.magnetarrc` 中设 `MODE=dry-run`，只扫描不下载不编译。
+`.magnetarrc` 中设 `MODE=dry-run`，只扫描不下载不编译。
+
+## CLI 命令
+
+```bash
+./bin/magnetar exec <model>          # 直接执行 pipeline（当前支持 mobilenet）
+./bin/magnetar run                   # agent 内输出提示，CLI 下直接执行
+./bin/magnetar init                  # 创建 .magnetarrc
+./bin/magnetar check                 # 检查环境 + 配置
+./bin/magnetar status                # 查看任务状态
+./bin/magnetar monitor               # TUI 实时流水线
+./bin/magnetar report                # 生成 HTML 仪表盘
+./bin/magnetar install               # 安装 Pulsar2 Docker 环境
+```
 
 ## 配置 (.magnetarrc)
 
@@ -55,7 +79,6 @@ BOARD=root@192.168.1.100           # 可选，不填跳过板端验证
 BOARD_PASSWORD=123456              # 板端密码
 SDK_LANG=both                      # python | cpp | both
 AUTO_APPROVE=false                 # true = 全自动，不暂停
-PULSAR2_IMAGE=pulsar2:6.0          # 可选，自定义 Pulsar2 镜像
 ```
 
 完整说明见 `.magnetarrc.example`。
@@ -83,13 +106,6 @@ PULSAR2_IMAGE=pulsar2:6.0          # 可选，自定义 Pulsar2 镜像
 | MobileNetV2 | 224×224 | ~3 MB | ~3 ms | ≥0.998 |
 
 > 你的模型转换完成后，精确数据在 `package/reports/performance_report.md`。
-
-## 可视化监控
-
-```bash
-./bin/magnetar monitor              # TUI 实时流水线
-./bin/magnetar report               # 生成 HTML 仪表盘
-```
 
 ## 工具链
 
