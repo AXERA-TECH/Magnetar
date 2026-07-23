@@ -57,11 +57,11 @@ if command -v python3 &>/dev/null; then
     py_ver=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
     py_major=$(echo "$py_ver" | cut -d. -f1)
     py_minor=$(echo "$py_ver" | cut -d. -f2)
+    echo -e "  ${GREEN}✓${NC} python3 $py_ver"
     if [ "$py_major" -eq 3 ] && [ "$py_minor" -ge 10 ] && [ "$py_minor" -le 13 ]; then
-        echo -e "  ${GREEN}✓${NC} python3 $py_ver"
+        :
     else
-        echo -e "  ${RED}✗${NC} python3 $py_ver — 需要 3.10-3.13（3.14 无 onnxruntime wheels）"
-        DEPS_OK=1
+        echo -e "    ${YELLOW}⚠${NC} onnxruntime 暂无 $py_ver wheels，uv 会自动用 3.12"
     fi
 else
     echo -e "  ${RED}✗${NC} python3 — 未找到 安装: apt install python3"
