@@ -563,7 +563,7 @@ workflow:
   - id: simulate
     kind: agent
     skill: .codex/skills/magnetar/hidden/simulate/SKILL.md
-    description: Compare ONNX and AXMODEL simulation outputs
+    description: Compare ONNX and AXMODEL simulation outputs. Prefers board ax_run_model (fast) over pulsar2 run (slow) when BOARD is available.
     depends_on:
     - stage_review_compile
     parallel_group: null
@@ -572,6 +572,8 @@ workflow:
     - axmodel_path
     - model_meta_json
     - TASK_DIR
+    - BOARD
+    - BOARD_PASSWORD
     outputs:
     - simulate_report
     - accuracy_metrics

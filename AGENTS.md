@@ -22,7 +22,7 @@ Agent 负责编排和决策。`magnetar/stages/*.py` 提供确定性执行函数
 | `magnetar.stages.export` | `run_mobilenet(task_dir)` → `sample` | MobileNet ONNX 导出+验证+校准 |
 | `magnetar.stages.toolchain` | `run()` → `pulsar_image` | 验证 Pulsar2 Docker 可用 |
 | `magnetar.stages.compile` | `run(task_dir, target_hw, image)` | Pulsar2 编译 AXMODEL |
-| `magnetar.stages.simulate` | `run(task_dir, sample, image)` → `metrics` | ONNX vs AXMODEL 精度对分 |
+| `magnetar.stages.simulate` | `run(task_dir, sample, image, board=board)` → `metrics` | 精度对分（优先板端 ax_run_model，回退 pulsar2 run） |
 | `magnetar.stages.sdk_gen` | `run_mobilenet_python()`, `run_mobilenet_cpp()` | 生成 Python/C++ SDK |
 | `magnetar.stages.runonboard` | `run(task_dir, sample, hw, pwd)` → `metrics` | 板端部署验证 |
 | `magnetar.stages.package` | `assemble(task_dir, metrics, image)` → `pkg` | 组装交付包 |
