@@ -22,7 +22,12 @@ def latest_pulsar2_image() -> str:
 def docker_pulsar2(image: str, workspace: str, command: str, timeout=1800) -> str:
     uid, gid = os.getuid(), os.getgid()
     wrapped = f"set +e; PATH=/usr/local/bin/.venv/bin:/opt/pulsar2:$PATH {command}; status=$?; chown -R {uid}:{gid} /workspace; exit $status"
-    return run(["docker", "run", "--rm", "-v", f"{workspace}:/workspace", image, "-lc", wrapped], timeout=timeout)
+    return run(["docker", "run", "--rm", "--network", "host",
+                "-v", f"{workspace}:/workspace",
+                "-v", "/var/hasplm:/var/hasplm",
+                "-v", "/tmp/p2_verify_home/.hasplm:/tmp/p2_verify_home/.hasplm",
+                "-e", "HASP_HOME=/tmp/p2_verify_home/.hasplm",
+                image, "-lc", wrapped], timeout=timeout)
 
 def make_writable(task_dir: str):
     from pathlib import Path
@@ -37,8 +42,14 @@ def get_pulsar2_proto_enums(image: str) -> dict:
     Returns:
         {"DataType": {"U8": 1, "FP32": 10, ...}, "ColorSpace": {...}, ...}
     """
-    raw = run(["docker", "run", "--rm", "--entrypoint", "cat", image,
-               "/opt/pulsar2/yamain/config/common.proto"], timeout=30)
+    for proto_path in ["/opt/pulsar2/yamain/config/common.proto", "/opt/pulsar2/axnn/yamain/config/common.proto"]:
+        try:
+            raw = run(["docker", "run", "--rm", "--entrypoint", "cat", image, proto_path], timeout=30)
+            break
+        except RuntimeError:
+            continue
+    else:
+        raise RuntimeError(f"Cannot find common.proto in Pulsar2 image {image}")
     enums: dict[str, dict[str, int]] = {}
     current = None
     for line in raw.splitlines():

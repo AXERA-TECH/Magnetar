@@ -34,17 +34,23 @@ check_docker() {
 
 usage() {
     cat <<'EOF'
-Usage: ./setup.sh [--copy|--link] [--force]
+Usage: ./setup.sh [--copy|--link] [--force] [--opencode] [--local]
 
-Install the Magnetar Codex skill into:
-  ${CODEX_HOME:-$HOME/.codex}/skills/magnetar
+Install the Magnetar skill into Codex or OpenCode.
+
+Default target:
+  Codex global:  ${CODEX_HOME:-$HOME/.codex}/skills/magnetar
 
 Options:
-  --copy   Copy the skill directory. This is the default.
-  --link   Install as a symlink to this repository.
-  --force  Replace an existing installed skill.
+  --copy     Copy the skill directory. This is the default.
+  --link     Install as a symlink to this repository.
+  --force    Replace an existing installed skill.
+  --opencode  Install for OpenCode instead of Codex.
+             (global: ~/.config/opencode/skills/magnetar)
+  --local    Install into project directory instead of global.
+             (.codex/skills/magnetar or .opencode/skills/magnetar)
   -h, --help
-           Show this help.
+             Show this help.
 EOF
 }
 
@@ -80,6 +86,8 @@ fi
 
 mode="copy"
 force="false"
+use_opencode="false"
+local_install="false"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -91,6 +99,12 @@ while [[ $# -gt 0 ]]; do
       ;;
     --force)
       force="true"
+      ;;
+    --opencode)
+      use_opencode="true"
+      ;;
+    --local)
+      local_install="true"
       ;;
     -h|--help)
       usage
@@ -107,8 +121,21 @@ done
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 skill_src="$repo_root/.codex/skills/magnetar"
-codex_home="${CODEX_HOME:-$HOME/.codex}"
-skills_dir="$codex_home/skills"
+
+if [[ "$use_opencode" == "true" ]]; then
+  if [[ "$local_install" == "true" ]]; then
+    skills_dir="$repo_root/.opencode/skills"
+  else
+    skills_dir="${XDG_CONFIG_HOME:-$HOME/.config}/opencode/skills"
+  fi
+else
+  if [[ "$local_install" == "true" ]]; then
+    skills_dir="$repo_root/.codex/skills"
+  else
+    codex_home="${CODEX_HOME:-$HOME/.codex}"
+    skills_dir="$codex_home/skills"
+  fi
+fi
 skill_dst="$skills_dir/magnetar"
 
 if [[ ! -f "$skill_src/SKILL.md" ]]; then

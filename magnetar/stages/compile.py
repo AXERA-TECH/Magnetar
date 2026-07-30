@@ -33,15 +33,13 @@ def _build_config(task_dir: Path, target_hw: str, pulsar_image: str,
     shape_str = "x".join(str(d) for d in input_shape)
     input_shapes = f"{input_name}:{shape_str}"
 
+    # 校准配置参照原始 yolov8l_ylb.json
     if input_dtype == "U8":
-        mean, std = [0, 0, 0], [255, 255, 255]
-        calib_format = "Numpy"
-    elif input_dtype == "FP32":
-        mean, std = [], []
-        calib_format = "Numpy"
+        calib_mean, calib_std = [0, 0, 0], [255, 255, 255]
+        src_layout = "NHWC"
     else:
-        mean, std = [], []
-        calib_format = "Numpy"
+        calib_mean, calib_std = [], []
+        src_layout = input_layout
 
     config = {
         "input": "/workspace/export/model.onnx",
@@ -61,13 +59,14 @@ def _build_config(task_dir: Path, target_hw: str, pulsar_image: str,
             "input_configs": [{
                 "tensor_name": input_name,
                 "calibration_dataset": "/workspace/export/calib_data/input.tar.gz",
-                "calibration_format": calib_format,
-                "calibration_size": 4,
-                "calibration_mean": [],
-                "calibration_std": [],
+                "calibration_format": "Numpy",
+                "calibration_size": 30,
+                "calibration_mean": calib_mean,
+                "calibration_std": calib_std,
             }],
             "calibration_method": "MinMax",
-            "precision_analysis": False,
+            "precision_analysis": True,
+            "precision_analysis_method": "EndToEnd",
             "highest_mix_precision": False,
         },
         "input_processors": [{
@@ -75,10 +74,8 @@ def _build_config(task_dir: Path, target_hw: str, pulsar_image: str,
             "tensor_format": "RGB",
             "tensor_layout": input_layout,
             "src_format": "RGB",
-            "src_layout": input_layout,
             "src_dtype": input_dtype,
-            "mean": mean,
-            "std": std,
+            "src_layout": src_layout,
         }],
     }
 
