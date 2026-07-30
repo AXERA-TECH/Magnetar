@@ -41,6 +41,9 @@ workflow:
       - when BOARD is provided, Python and C++ SDK examples run on a board whose chip_type matches TARGET_HARDWARE
       - package/README.md explains model overview, quick start (inference + reproduce), directory layout, performance, and
         limitations
+      - package/setup.sh exists, is executable, and installs all deps in one command
+      - package/run.sh exists, is executable, and runs inference in one command
+      - package self_test passes: fresh copy → bash setup.sh → bash run.sh succeeds with no manual intervention
       - package/model_convert/README.md covers env setup, ONNX export, calibration, pulsar2 compile (full command, no placeholders),
         artifact check, and FAQ
       - package/model_convert/requirements.txt exists with all dependencies grouped by category
@@ -79,6 +82,8 @@ workflow:
       - package/reports/performance_report.md
       - package/README.md
       - package/.gitignore
+      - package/setup.sh
+      - package/run.sh
     assumptions:
     - The Arm URL supplied by the user is the C++ cross-compilation toolchain source, not a Pulsar2 distribution.
     - Pulsar2 is provided by the user environment, a local binary, a user-specified Docker image/package, or the HuggingFace
@@ -837,23 +842,28 @@ workflow:
     depends_on:
     - package
     pass_when:
-    - all required package artifacts exist
+    - all required package artifacts exist including setup.sh and run.sh
+    - setup.sh is executable and installs deps in one command
+    - run.sh is executable and runs inference in one command
     - model_convert/requirements.txt is present and non-empty
     - model_convert/compile_pulsar2.sh is present and executable
     - model_convert/README.md contains complete pulsar2 build command with no placeholders
     - python/README.md covers env install, quick run, and API
     - cpp/README.md covers local build, cross-compile, board deploy, and API
-    - package/README.md covers model overview, quick start (inference + reproduce), directory layout, performance, and limitations
+    - package/README.md covers model overview, two-step quick start, directory layout, performance, and limitations
+    - "self_test() passes: simulate a beginner who ONLY reads README → bash setup.sh → bash run.sh → success"
     - RUNONBOARD passed with board validation report
     - performance_report.md exists with pipeline timing, model efficiency, latency, and board memory sections
     fail_when:
     - required artifact is missing
     - any README contains placeholder text ("...", "<path>", "<fill me>")
+    - setup.sh or run.sh does not exist or is not executable
+    - "self_test() fails (beginner simulation fails)"
     - pulsar2 build command is incomplete or omitted
     - requirements.txt is missing
     - RUNONBOARD could not execute with provided BOARD
     on_pass: succeeded
-    on_fail: failed
+    on_fail: repair scripts/README and retry self_test, max 3 attempts before blocking
   failure_policy:
     default_action: fail
     max_total_attempts: 3
@@ -862,6 +872,7 @@ workflow:
     - simulate tool failure → rollback to compile (adjust quantization config)
     - accuracy_gate failure → rollback to compile (apply issues/ fix or user-adjusted tuning)
     - package directory rewrite after failed package validation
+    - self_test failure → fix scripts/README, re-assemble, retry self_test
     ask_user_for:
     - missing SOURCE or TARGET_HARDWARE (checked at requirements gate)
     - private model credentials
@@ -902,6 +913,9 @@ workflow:
     - package/README.md exists and covers model overview, quick start, directory layout, performance, and limitations
     - RUNONBOARD has been attempted (executed when BOARD provided, skipped when absent) and report exists
     - no README contains placeholder text
+    - package/setup.sh exists, is executable, and installs deps cleanly
+    - package/run.sh exists, is executable, and runs inference cleanly
+    - self_test() passes: beginner simulation (fresh copy → bash setup.sh → bash run.sh) succeeds
     failure_when:
     - required Pulsar2 capability is unavailable
     - ONNX export cannot be validated

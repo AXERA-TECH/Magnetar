@@ -25,7 +25,7 @@ Agent 负责编排和决策。`magnetar/stages/*.py` 提供确定性执行函数
 | `magnetar.stages.simulate` | `run(task_dir, sample, image, board=board)` → `metrics` | 精度对分（优先板端 ax_run_model，回退 pulsar2 run） |
 | `magnetar.stages.sdk_gen` | `run_mobilenet_python()`, `run_mobilenet_cpp()` | 生成 Python/C++ SDK |
 | `magnetar.stages.runonboard` | `run(task_dir, sample, hw, pwd)` → `metrics` | 板端部署验证 |
-| `magnetar.stages.package` | `assemble(task_dir, metrics, image)` → `pkg` | 组装交付包 |
+| `magnetar.stages.package` | `assemble(task_dir, metrics, image)` → `pkg`, `self_test(pkg)` → `result` | 组装面向小白的交付包，含一键脚本 + README + 自测 |
 
 非 MobileNet 模型：Agent 需自行实现 ONNX 导出逻辑并正确填写 `model_meta.json`。
 
