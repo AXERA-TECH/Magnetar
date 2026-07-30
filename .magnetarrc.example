@@ -52,6 +52,17 @@ PULSAR2_BIN=
 # 私有模型访问令牌（留空则从环境变量 HF_TOKEN 读取）
 # HF_TOKEN=
 
+# ===== PUBLISH 发布凭据 =====
+
+# GitHub 个人访问令牌（留空则从环境变量 GITHUB_TOKEN 读取）
+# GITHUB_TOKEN=
+
+# GitHub 组织名（可选，默认推送到个人账户）
+# GITHUB_ORG=
+
+# HuggingFace 命名空间（可选，默认推送到个人账户）
+# HF_ORG=
+
 # HuggingFace 镜像端点（国内默认 hf-mirror，海外用户可设为空字符串）
 # HF_ENDPOINT=https://hf-mirror.com
 

@@ -793,6 +793,29 @@ workflow:
       action: fail
       target_step: null
     visibility: user_visible
+  - id: publish
+    kind: agent
+    skill: .codex/skills/magnetar/hidden/publish/SKILL.md
+    description: 'Publish the validated package to GitHub (full source) or HuggingFace (pre-compiled model only). STOP: ask user for target, repo name, and credentials.'
+    depends_on:
+    - package
+    parallel_group: null
+    inputs:
+    - package_dir
+    - model_name
+    outputs:
+    - publish_url
+    - publish_target
+    timeout_seconds: 300
+    retry:
+      max_attempts: 2
+      retry_on:
+      - network_transient
+      backoff: fixed
+    on_failure:
+      action: ask_user
+      target_step: null
+    visibility: user_visible
   gates:
   - id: required_inputs
     kind: requirement
@@ -862,8 +885,24 @@ workflow:
     - pulsar2 build command is incomplete or omitted
     - requirements.txt is missing
     - RUNONBOARD could not execute with provided BOARD
-    on_pass: succeeded
+    on_pass: proceed to publish
     on_fail: repair scripts/README and retry self_test, max 3 attempts before blocking
+  - id: publish_gate
+    kind: validation
+    depends_on:
+    - publish
+    pass_when:
+    - user confirmed publish target (github or huggingface)
+    - user provided repo name
+    - user provided credentials (GITHUB_TOKEN or HF_TOKEN)
+    - publish URL is accessible
+    - no credential leakage in package artifacts
+    fail_when:
+    - user did not provide target, repo name, or credentials
+    - publish push/upload failed with unrecoverable error
+    - credentials are empty or invalid
+    on_pass: succeeded
+    on_fail: ask user to retry with corrected inputs
   failure_policy:
     default_action: fail
     max_total_attempts: 3
@@ -873,6 +912,7 @@ workflow:
     - accuracy_gate failure → rollback to compile (apply issues/ fix or user-adjusted tuning)
     - package directory rewrite after failed package validation
     - self_test failure → fix scripts/README, re-assemble, retry self_test
+    - publish failure → fix credentials/repo, retry publish (max 2)
     ask_user_for:
     - missing SOURCE or TARGET_HARDWARE (checked at requirements gate)
     - private model credentials
@@ -882,6 +922,7 @@ workflow:
     - accuracy below threshold after issues/ search yields no match
     - board credentials
     - export failed after max retries
+    - publish target, repo name, and credentials (asked at publish stage)
     degraded_output_allowed: true
     degraded_conditions:
     - C++ cross compiler unavailable but CMake configure succeeds
@@ -916,6 +957,8 @@ workflow:
     - package/setup.sh exists, is executable, and installs deps cleanly
     - package/run.sh exists, is executable, and runs inference cleanly
     - self_test() passes: beginner simulation (fresh copy → bash setup.sh → bash run.sh) succeeds
+    - publish URL is recorded in task.md
+    - publish target (github/huggingface) is documented
     failure_when:
     - required Pulsar2 capability is unavailable
     - ONNX export cannot be validated

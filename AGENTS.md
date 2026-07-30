@@ -6,7 +6,7 @@
 
 将远程或本地浮点模型转换为 AX 芯片客户交付包：
 
-`模型 → ONNX → Pulsar2 编译 → AXMODEL → 仿真验证 → Python/C++ SDK → 交付包`
+`模型 → ONNX → Pulsar2 编译 → AXMODEL → 仿真验证 → Python/C++ SDK → 交付包 → 发布`
 
 ## 工具库
 
@@ -26,12 +26,13 @@ Agent 负责编排和决策。`magnetar/stages/*.py` 提供确定性执行函数
 | `magnetar.stages.sdk_gen` | `run_mobilenet_python()`, `run_mobilenet_cpp()` | 生成 Python/C++ SDK |
 | `magnetar.stages.runonboard` | `run(task_dir, sample, hw, pwd)` → `metrics` | 板端部署验证 |
 | `magnetar.stages.package` | `assemble(task_dir, metrics, image)` → `pkg`, `self_test(pkg)` → `result` | 组装面向小白的交付包，含一键脚本 + README + 自测 |
+| `magnetar.stages.publish` | `publish(pkg, target, name, token, org, model)` → `result` | 发布到 GitHub（源码）或 HuggingFace（预编译） |
 
 非 MobileNet 模型：Agent 需自行实现 ONNX 导出逻辑并正确填写 `model_meta.json`。
 
 ## 执行流程
 
-严格按以下顺序推进 9 阶段，不可跳过。每阶段完成后更新 `task.md` 和 `analysis.md`。
+严格按以下顺序推进 10 阶段，不可跳过。每阶段完成后更新 `task.md` 和 `analysis.md`。
 
 状态机（回退/重试/循环）由 `workflows/magnetar.yaml` 控制。
 
@@ -45,6 +46,7 @@ Agent 负责编排和决策。`magnetar/stages/*.py` 提供确定性执行函数
 - 编译失败需改 ONNX → 退回 EXPORT
 - SIMULATE 精度不达标（先查 `issues/`，无匹配再 STOP）
 - 需要私有凭据
+- PUBLISH 需用户确认发布目标、仓库名、凭据
 
 BOARD 缺失不是 STOP——自动跳过 RUNONBOARD。
 
@@ -82,10 +84,12 @@ Pulsar2 用 `(img - mean) / std`，libdet 用 `(input - mean) * std`。必须反
 ### 编译
 ONNX 必须静态 shape。编译前用 ONNX Runtime 验证。
 
-### 分发
-- GitHub：源码 + model_convert（客户可复现）
-- HuggingFace：预编译模型 + binary（客户直接用），不含 model_convert
-- HF README 需 YAML frontmatter
+### PUBLISH 发布
+- 进入 PUBLISH 阶段时暂停，询问用户：发布到哪里（GitHub/HuggingFace）、仓库名、凭据位置
+- GitHub：推送完整源码 + model_convert（客户可复现编译流程）
+- HuggingFace：仅上传预编译模型 + Python SDK（客户直接用），不含 model_convert/ 和 C++ 源码
+- HF README 自动添加 YAML frontmatter
+- 凭据通过 GITHUB_TOKEN / HF_TOKEN 环境变量或 .magnetarrc 提供
 
 ## 验证期望
 
