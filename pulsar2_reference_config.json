@@ -1,0 +1,56 @@
+{
+  // ── 必填基础项 ──
+  "input": "/workspace/export/model.onnx",
+  "output_dir": "/workspace/compile",
+  "output_name": "model.axmodel",
+  "work_dir": "/workspace/compile/work",
+
+  "model_type": "ONNX",               // ONNX, QuantAxModel, ISP, QuantONNX, OptimizedQuantAxModel
+  "target_hardware": "AX650",          // AX650, AX620E, M76H, LAMBERT, LAGUNA, M57, AX620L, AX615, AX637, AX8860
+  "npu_mode": "NPU3",                 // NPU1, NPU2, NPU3, NPU4, NPU5, ISP1, ISP2, ISP3
+  "input_shapes": "input:1x3x224x224",       // name:dim1xdim2x...
+
+  // ── ONNX 优化 ──
+  "onnx_opt": {
+    "disable_onnx_optimization": false,
+    "enable_onnxsim": false,          // 推荐 true
+    "model_check": true
+  },
+
+  // ── 量化配置 ──
+  // 标定方法: MinMax, Percentile, MSE, KL
+  "quant": {
+    "calibration_method": "MinMax",   // 通用默认; Transformer 推荐 KL
+
+    // --- 标定数据 ---
+    "input_configs": [{
+      "tensor_name": "input",
+      "calibration_dataset": "/workspace/export/calib_data/input.tar.gz",
+      "calibration_format": "Numpy",  // Image, Numpy, Binary, NumpyObject
+      "calibration_size": 8,
+      "calibration_mean": [],
+      "calibration_std": []
+    }],
+
+    // --- 逐层精度 (可选, 格式: op_type + 类型) ---
+    // 可用 data_type / weight_data_type / output_data_type: DefaultDataType, U8, S8, U16, S16, U32, S32, U64, S64, FP16, FP32, BF16, NVFP4
+    // weight_data_type 仅支持 S8 或 FP32
+    "layer_configs": [
+      { "op_type": "Conv",   "data_type": "U8",  "weight_data_type": "S8",  "output_data_type": "U8" },
+      { "op_type": "MatMul", "data_type": "U16", "weight_data_type": "U16", "output_data_type": "U16" }
+    ],
+
+    // --- 可选量化增强 (三选一) ---
+    // "enable_smooth_quant": true,      // SmoothQuant: 平滑激活/权重
+    // "smooth_quant_alpha": 0.5,
+    // "enable_brecq": true,             // Brecq: 逐块重建
+    // "enable_lsq": true,               // LSQ: 可学习步长 (需 QAT)
+
+    // --- 其他 ---
+    "highest_mix_precision": false,   // 必须 false
+    "precision_analysis": false       // true=输出每层精度报告
+  },
+
+  // ── 编译 ──
+  "compiler": { "check": 3 }        // 0=无 1=逐值 2=统计 3=余弦验证
+}
