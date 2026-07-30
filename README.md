@@ -2,7 +2,7 @@
 
 将浮点 AI 模型一键转换为 AX 芯片可部署的 AXMODEL 交付包（含 Python/C++ SDK）。
 
-`模型 → ONNX → Pulsar2 编译 → AXMODEL → 仿真验证 → Python/C++ SDK → 交付包`
+`模型 → ONNX → Pulsar2 编译 → AXMODEL → 仿真验证 → Python/C++ SDK → 交付包 → 发布`
 
 ## 快速开始
 
@@ -24,7 +24,7 @@ cd Magnetar
 转换到 AX650
 ```
 
-Agent 会读取 `AGENTS.md`（所有 Agent 的统一入口），按 9 阶段自动推进。
+Agent 会读取 `AGENTS.md`（所有 Agent 的统一入口），按 10 阶段自动推进。
 
 不想每次手输参数？创建配置文件固化：
 
@@ -38,13 +38,17 @@ cp .magnetarrc.example .magnetarrc
 
 ```
 package/
-├── README.md           # 模型概述 + 快速开始
+├── README.md           # 极简两步上手
+├── setup.sh            # 一键安装依赖
+├── run.sh              # 一键运行推理
 ├── models/             # model.axmodel + model_meta.json
 ├── python/             # Python SDK（pyaxengine）
 ├── cpp/                # C++ SDK（交叉编译）
 ├── model_convert/      # 复现脚本（export + compile）
 └── reports/            # 性能 + 精度报告
 ```
+
+PACKAGE 完成后进入 PUBLISH 阶段：Agent 会问你**发布到哪（GitHub/HF）、仓库名、凭据**，然后自动推送。
 
 ### Dry-Run 预览
 
@@ -75,6 +79,7 @@ AUTO_APPROVE=false                 # true = 全自动，不暂停
 | SDK-GEN | Python + C++ SDK | SDK 源码 + 示例 |
 | RUNONBOARD | 板端验证（可选） | 精度/延迟/内存报告 |
 | PACKAGE | 组装客户交付包 | `package/` |
+| PUBLISH | 发布到 GitHub / HuggingFace | repo URL |
 
 ## 性能参考 (AX650, INT8)
 
