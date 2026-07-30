@@ -87,7 +87,7 @@ ONNX 必须静态 shape。编译前用 ONNX Runtime 验证。
 ### PUBLISH 发布
 - 进入 PUBLISH 阶段时暂停，询问用户：发布到哪里（GitHub/HuggingFace）、仓库名、凭据位置
 - GitHub：推送完整源码 + model_convert（客户可复现编译流程）
-- HuggingFace：仅上传预编译模型 + Python SDK（客户直接用），不含 model_convert/ 和 C++ 源码
+- HuggingFace：仅上传预编译模型 + SDK 产物（客户直接用），不含 model_convert/ 复现脚本
 - HF README 自动添加 YAML frontmatter
 - 凭据通过 GITHUB_TOKEN / HF_TOKEN 环境变量或 .magnetarrc 提供
 

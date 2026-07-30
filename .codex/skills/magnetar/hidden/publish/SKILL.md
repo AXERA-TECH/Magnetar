@@ -31,11 +31,11 @@ result = magnetar.stages.publish.publish(
 | 平台 | 内容 | 理念 |
 |------|------|------|
 | GitHub | 完整包（含 model_convert/ + C++ 源码） | 客户可复现编译流程 |
-| HuggingFace | 精简包（仅 models/ + python/ + reports/ + setup.sh + run.sh） | 客户直接用预编译模型 |
+| HuggingFace | 精简包（models/ + python/ + cpp/ + reports/ + setup.sh + run.sh） | 客户直接用预编译模型和库 |
 
 ## HF 特殊处理
 
-- 剔除 `model_convert/`、`cpp/`、`.git`、`__pycache__`
+- 剔除 `model_convert/`、`.git`、`__pycache__`（cpp/ 编译产物保留）
 - README.md 自动添加 YAML frontmatter（license、pipeline_tag、tags）
 - 上传到 HF model repo
 

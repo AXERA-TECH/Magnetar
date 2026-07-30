@@ -57,7 +57,7 @@ def _publish_huggingface(pkg: Path, repo_name: str, token: str | None,
                           org: str | None, model_name: str) -> dict:
     """发布到 HuggingFace：仅上传预编译模型 + Python SDK。
 
-    HF 分发预编译产物（客户直接用），不含 model_convert/ 和 C++ 源码。
+    HF 分发预编译产物（客户直接用），不含 model_convert/（复现编译脚本）。cpp/ 编译产物（.so、可执行文件）全部保留。
     README 需添加 YAML frontmatter。
     """
     token = token or os.environ.get("HF_TOKEN")
@@ -72,7 +72,7 @@ def _publish_huggingface(pkg: Path, repo_name: str, token: str | None,
     with tempfile.TemporaryDirectory(prefix="magnetar_hf_") as tmp:
         hf_dir = Path(tmp) / repo_name
         shutil.copytree(pkg, hf_dir, dirs_exist_ok=True,
-                        ignore=shutil.ignore_patterns("model_convert", "cpp", ".git", "__pycache__", "*.pyc"))
+                        ignore=shutil.ignore_patterns("model_convert", ".git", "__pycache__", "*.pyc"))
 
         # HF README 加 YAML frontmatter
         readme = hf_dir / "README.md"
