@@ -74,6 +74,9 @@ def _publish_huggingface(pkg: Path, repo_name: str, token: str | None,
         shutil.copytree(pkg, hf_dir, dirs_exist_ok=True,
                         ignore=shutil.ignore_patterns("model_convert", ".git", "__pycache__", "*.pyc"))
 
+        # 上传空白 config.json 用于 HF 下载追踪
+        (hf_dir / "config.json").write_text("{}", encoding="utf-8")
+
         # HF README 加 YAML frontmatter
         readme = hf_dir / "README.md"
         if readme.exists():
