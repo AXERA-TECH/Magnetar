@@ -11,10 +11,11 @@ from pathlib import Path
 
 def _read_proto(image, path):
     import subprocess
-    return subprocess.run(
+    proc = subprocess.run(
         ["docker", "run", "--rm", "--entrypoint", "cat", image, path],
         capture_output=True, text=True, timeout=30
-    ).stdout
+    )
+    return proc.stdout if proc.returncode == 0 else ""
 
 
 def _parse_enums(text):
@@ -40,11 +41,19 @@ def get_enums(image):
     Returns: {"DataType": {"U8": 1, "FP32": 10}, "QuantMethod": {"MinMax": 0, ...}, ...}
     """
     enums = OrderedDict()
-    for path in ["/opt/pulsar2/yamain/config/common.proto",
-                 "/opt/pulsar2/yamain/config/build_config.proto"]:
-        text = _read_proto(image, path)
-        for k, v in _parse_enums(text).items():
-            enums[k] = v
+    # Pulsar2 6.0 与 7.0 的 proto 目录不同，依次尝试
+    proto_roots = ["/opt/pulsar2/yamain/config",
+                   "/opt/pulsar2/axnn/yamain/config"]
+    for root in proto_roots:
+        texts = {}
+        for name in ("common.proto", "build_config.proto"):
+            texts[name] = _read_proto(image, f"{root}/{name}")
+        if not any(texts.values()):
+            continue
+        for text in texts.values():
+            for k, v in _parse_enums(text).items():
+                enums[k] = v
+        break
     return enums
 
 

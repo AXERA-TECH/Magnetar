@@ -22,11 +22,14 @@ def latest_pulsar2_image() -> str:
 def docker_pulsar2(image: str, workspace: str, command: str, timeout=1800) -> str:
     uid, gid = os.getuid(), os.getgid()
     wrapped = f"set +e; PATH=/usr/local/bin/.venv/bin:/opt/pulsar2:$PATH {command}; status=$?; chown -R {uid}:{gid} /workspace; exit $status"
+    # Pulsar2 7.0 driverless license needs the license dir mounted at /root/.hasplm
+    # (source dir can be overridden with MAGNETAR_HASP_SRC; default is the old verify home).
+    hasp_src = os.environ.get("MAGNETAR_HASP_SRC", "/tmp/p2_verify_home/.hasplm")
     return run(["docker", "run", "--rm", "--network", "host",
                 "-v", f"{workspace}:/workspace",
                 "-v", "/var/hasplm:/var/hasplm",
-                "-v", "/tmp/p2_verify_home/.hasplm:/tmp/p2_verify_home/.hasplm",
-                "-e", "HASP_HOME=/tmp/p2_verify_home/.hasplm",
+                "-v", f"{hasp_src}:/root/.hasplm",
+                "-e", "HASP_HOME=/root/.hasplm",
                 image, "-lc", wrapped], timeout=timeout)
 
 def make_writable(task_dir: str):
