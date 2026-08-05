@@ -48,6 +48,9 @@ result = magnetar.stages.publish.publish(
 
 - GitHub：确认 push 成功，返回 repo URL
 - HF：确认 upload_folder 成功，返回 model URL
+- 端到端 NPU 跑通（RUNONBOARD 通过）时，发布包 SDK 为 NPU 专用版：
+  无 `onnxruntime`/`torch`/`transformers` 运行时回退，依赖仅 `numpy + pyaxengine`
+- 检查 `package/NPU_ONLY_SDK.md` 存在且 `python/*_sdk/inference.py` 无 `import onnxruntime`
 
 ## 失败处理
 

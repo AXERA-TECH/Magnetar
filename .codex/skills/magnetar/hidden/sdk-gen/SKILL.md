@@ -15,10 +15,36 @@ MobileNet 直接调用：
 - C++：CMake 直接链接 `ax_engine`/`ax_sys`（不用 FetchContent），cmake configure 通过
 - YOLO 系列：集成 libdet.axera，`requirements.txt` 注明 `git clone` 获取方式
 
+## 通用 SDK 生成（非 MobileNet）
+
+优先调用：
+- `magnetar.stages.sdk_gen.run_generic_python(task_dir)` → `sdk/python/<model>_sdk/`
+- `magnetar.stages.sdk_gen.run_generic_cpp(task_dir, target_hw)` → `sdk/cpp/`
+
+一致性保障（自动）：
+- 模型接口（输入输出名/shape/dtype）以 `export/model_meta.json` 为权威
+- 预处理/后处理与示例输入以 `origin/model_flow.json`（ACQUIRE 阶段记录）为准
+- `example_input` 缺失、`preprocess_code`/`postprocess_code` 语法错误时抛错，
+  避免生成与真实运行流程不一致的 SDK
+- 生成后务必用 `example.py --model ... --input <真实样本>` 验证一次（板端或 ORT 回退）
+
+需要自定义预处理/后处理时，在 `model_flow.json` 提供代码后重新调用生成函数。
+
+## 发布版（NPU 专用，无 CPU 回退）
+
+**端到端 NPU 跑通后（RUNONBOARD 报告存在），发布包内 SDK 不再保留 onnxruntime 回退**：
+- `package.assemble()` 会自动把 `package/python` 下的通用 SDK 替换为 NPU-only 版
+  （`inference.py` 只 import axengine，非 AX 环境直接报错并提示在板端运行）
+- 交付 SDK 的依赖仅为 `numpy + pyaxengine`，不包含 onnxruntime/torch/transformers
+- 源目录 `sdk/python/` 保留开发版（含 ORT 回退）供本机逻辑验证，不进交付包
+- 需要严格版时也可直接调用 `run_generic_python(task_dir, strict_npu=True)`
+
 ## 验证
 - Python `import <model>_sdk` 成功
 - C++ `cmake configure` 成功
+- Python `example.py` 用 ACQUIRE 真实样本跑通，输出与 ONNX/板端一致
 - `requirements.txt` 覆盖完整依赖
+- 发布包（RUNONBOARD 通过后）SDK 不含 `import onnxruntime`，依赖仅 numpy + pyaxengine
 
 ## STOP
 - 无（此阶段总是可执行）

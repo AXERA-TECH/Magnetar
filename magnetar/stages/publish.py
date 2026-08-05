@@ -26,11 +26,20 @@ def publish(pkg: Path, target: Literal["github", "huggingface"],
         {"ok": bool, "url": str, "errors": list}
     """
     if target == "github":
-        return _publish_github(pkg, repo_name, token, org)
+        result = _publish_github(pkg, repo_name, token, org)
     elif target == "huggingface":
-        return _publish_huggingface(pkg, repo_name, token, org, model_name)
+        result = _publish_huggingface(pkg, repo_name, token, org, model_name)
     else:
-        return {"ok": False, "url": "", "errors": [f"未知发布目标: {target}"]}
+        result = {"ok": False, "url": "", "errors": [f"未知发布目标: {target}"]}
+
+    from magnetar.stages.state import mark_stage
+    mark_stage(
+        pkg.parent, "PUBLISH",
+        status="done" if result.get("ok") else "blocked",
+        artifacts={"publish_url": result.get("url", "")},
+        summary=f"PUBLISH {'成功' if result.get('ok') else '失败'}: {result.get('url', '')}",
+    )
+    return result
 
 
 def _publish_github(pkg: Path, repo_name: str, token: str | None, org: str | None) -> dict:

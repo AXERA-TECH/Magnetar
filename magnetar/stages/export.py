@@ -1,4 +1,8 @@
-"""EXPORT: 导出静态 ONNX 并验证。"""
+"""EXPORT: 导出静态 ONNX 并验证。
+
+非 MobileNet 模型统一走 ``run_generic``：先尝试最简单导出，失败自动降级，
+详见 ``magnetar/export_onnx.py``。
+"""
 import json, tarfile
 from pathlib import Path
 import numpy as np
@@ -38,3 +42,32 @@ def run_custom(task_dir: Path, onnx_path: str | Path):
     import shutil
     ed = task_dir / "export"; ed.mkdir(parents=True, exist_ok=True)
     shutil.copy2(onnx_path, ed / "model.onnx")
+
+
+def run_generic(task_dir: Path, *, model=None, example_inputs=None, load_script=None,
+                arch=None, checkpoint=None, input_names=None, output_names=None,
+                opset=17, model_name="model", sample_variants=4, cosine_threshold=0.99,
+                require_static=True) -> dict:
+    """EXPORT 通用编排入口：任意 PyTorch 模型 -> 静态 ONNX + meta + 校准数据。
+
+    支持三种模型来源（互斥）：已加载的 ``model`` 对象、``load_script``（最普适）、
+    ``arch``（torchvision/timm/hf 架构名，可配 ``checkpoint`` 权重）。
+    返回 dict: onnx_path / model_meta / attempts / cosine / input_names / output_names。
+    全部路径失败时抛 ExportError（诊断报告在 export/export_report.md）。
+    """
+    from magnetar.export_onnx import export_to_onnx
+    return export_to_onnx(
+        task_dir,
+        model=model,
+        example_inputs=example_inputs,
+        load_script=load_script,
+        arch=arch,
+        checkpoint=checkpoint,
+        input_names=input_names,
+        output_names=output_names,
+        opset=opset,
+        model_name=model_name,
+        sample_variants=sample_variants,
+        cosine_threshold=cosine_threshold,
+        require_static=require_static,
+    )

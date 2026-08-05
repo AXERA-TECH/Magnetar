@@ -81,6 +81,50 @@ AUTO_APPROVE=false                 # true = 全自动，不暂停
 | PACKAGE | 组装客户交付包 | `package/` |
 | PUBLISH | 发布到 GitHub / HuggingFace | repo URL |
 
+## 通用 ONNX 导出（非 MobileNet 模型）
+
+EXPORT 阶段默认走 `magnetar/export_onnx.py` 通用导出器：**先尝试最简单路径
+`torch.onnx.export(dynamo=False)`，失败后自动逐级降级**（opset 13/11 →
+dynamo/`torch.export` → onnxsim 后处理），并记录每一步失败原因。成功后自动完成
+ONNX Runtime 对分（cosine ≥ 0.99）、静态 shape 检查、`model_meta.json`、
+校准数据与 `export_report.md`；全部路径失败时抛出带诊断报告的 `ExportError`，
+Agent 依据报告决定人工处理方向。
+
+最普适的用法是写一个 load 脚本（定义 `build()` 返回 `(model, example_inputs)`）：
+
+```bash
+python scripts/export_onnx.py --task-dir todos/work/demo \
+    --load-script /path/to/load.py --model-name demo
+```
+
+也支持架构名快速导出（配合权重）：
+
+```bash
+python scripts/export_onnx.py --task-dir todos/work/demo \
+    --arch torchvision:mobilenet_v2 --checkpoint weights.pt \
+    --input-shapes 1x3x224x224 --model-name demo
+```
+
+Python API：`magnetar.stages.export.run_generic(task_dir, model=..., example_inputs=...)`
+或直接 `magnetar.export_onnx.export_to_onnx(...)`。load 脚本约定见
+`scripts/export_onnx.py --help`。
+
+## 通用 SDK 生成（非 MobileNet）
+
+SDK-GEN 阶段对非 MobileNet 模型优先调用 `magnetar.stages.sdk_gen.run_generic_python(task_dir)`
+和 `run_generic_cpp(task_dir)`，基于两份文件生成：
+
+- `export/model_meta.json`：模型接口权威（输入输出名/shape/dtype，AXMODEL 即按此编译）
+- `origin/model_flow.json`：ACQUIRE 阶段记录的运行流程（真实样本、预处理/后处理代码）
+
+一致性由生成器强制保障：示例样本缺失或预处理/后处理代码语法错误会直接报错，
+避免生成与 ACQUIRE 验证过的运行流程不一致的 SDK。自定义预处理/后处理只需在
+`model_flow.json` 提供代码后重新生成。
+
+**发布版约束**：端到端 NPU 验证通过（RUNONBOARD 报告存在）后，`package/assemble()`
+自动把交付包内 SDK 替换为 NPU 专用版——只依赖 `numpy + pyaxengine`，
+不含 onnxruntime/torch/transformers 回退；源目录保留开发版供本机验证。
+
 ## 性能参考 (AX650, INT8)
 
 | 模型 | 输入 | AXMODEL | 延迟 | Cosine |

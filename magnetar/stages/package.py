@@ -30,6 +30,17 @@ def assemble(task_dir: Path, metrics: dict, pulsar_image: str,
     has_py = py_src.exists()
     if has_py:
         shutil.copytree(py_src, pkg / "python", dirs_exist_ok=True)
+        # 端到端 NPU 已跑通（runonboard_report 存在）→ 发布包内 SDK 去掉
+        # onnxruntime/torch/transformers 回退，只保留 AX 芯片推理路径。
+        npu_verified = (task_dir / "runonboard" / "runonboard_report.md").is_file()
+        if npu_verified:
+            from magnetar.stages.sdk_gen import make_npu_only_sdk_dir
+            make_npu_only_sdk_dir(pkg / "python")
+            (pkg / "NPU_ONLY_SDK.md").write_text(
+                "本交付包已通过端到端 NPU 验证，Python SDK 仅依赖 pyaxengine，"
+                "不含 onnxruntime/torch/transformers 等运行时回退。\n",
+                encoding="utf-8",
+            )
 
     # ---- cpp SDK ----
     cpp_src = task_dir / "sdk" / "cpp"
@@ -76,6 +87,9 @@ def assemble(task_dir: Path, metrics: dict, pulsar_image: str,
     (pkg / ".gitignore").write_text(
         "__pycache__/\n*.pyc\nbuild/\nCMakeFiles/\nCMakeCache.txt\n*.egg-info/\n", encoding="utf-8")
 
+    from magnetar.stages.state import mark_stage
+    mark_stage(task_dir, "PACKAGE", artifacts={"package": str(pkg)},
+               summary=f"交付包 {pkg.name}")
     return pkg
 
 

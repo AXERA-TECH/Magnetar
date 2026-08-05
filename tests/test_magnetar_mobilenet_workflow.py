@@ -126,7 +126,7 @@ class MobileNetRealWorkflowTest(unittest.TestCase):
         self.assertEqual(workflow["name"], "magnetar")
         self.assertIn(
             "package/models/model.axmodel",
-            "\n".join(workflow["completion"]["success_when"]),
+            "\n".join(workflow["requirement"]["acceptance"]["required_artifacts"]),
         )
 
         pulsar_image = latest_pulsar2_image()

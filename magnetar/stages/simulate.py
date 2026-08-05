@@ -23,17 +23,30 @@ def run(task_dir: Path, sample: np.ndarray, pulsar_image: str,
     onnx_out = sess.run(None, {input_name: sample})[0].astype(np.float32)
 
     # 2. 尝试板端快速通道
+    metrics = None
     if board is not None:
         try:
             metrics = _run_on_board(task_dir, sample, onnx_out, board, output_name)
             _write_report(sd, metrics, method=f"board: {board['host']}")
-            return metrics
         except Exception as e:
             (sd / "board_fast_failed.log").write_text(str(e), encoding="utf-8")
             print(f"[SIMULATE] Board fast path failed: {e}, falling back to pulsar2 run")
 
     # 3. 回退 Pulsar2 仿真
-    return _run_pulsar2(task_dir, sample, onnx_out, pulsar_image, sd, input_name, output_name)
+    if metrics is None:
+        metrics = _run_pulsar2(task_dir, sample, onnx_out, pulsar_image, sd, input_name, output_name)
+
+    from magnetar.stages.state import mark_stage
+    mark_stage(
+        task_dir, "SIMULATE",
+        metrics={
+            "cosine_similarity": metrics.get("cosine_similarity"),
+            "mae": metrics.get("mae"),
+            "max_abs_diff": metrics.get("max_abs_diff"),
+        },
+        summary=f"SIMULATE cosine={metrics.get('cosine_similarity', 'N/A')}",
+    )
+    return metrics
 
 
 def _run_on_board(task_dir: Path, sample: np.ndarray, onnx_out: np.ndarray,

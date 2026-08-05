@@ -18,17 +18,20 @@ Agent 负责编排和决策。`magnetar/stages/*.py` 提供确定性执行函数
 | `magnetar.docker_util` | `latest_pulsar2_image()`, `docker_pulsar2()` | Docker/Pulsar2 封装 |
 | `magnetar.board_util` | `select_board()`, `ssh()`, `scp_to()`, `scp_from()` | AX 板端操作 |
 | `magnetar.stages.init` | `run(config)` → `task_dir` | 创建 TASK_DIR 结构 |
-| `magnetar.stages.acquire` | `run(task_dir, source)` | 获取模型到 origin/ |
-| `magnetar.stages.export` | `run_mobilenet(task_dir)` → `sample` | MobileNet ONNX 导出+验证+校准 |
+| `magnetar.stages.acquire` | `run(task_dir, source)`；`write_model_flow(task_dir, flow)` | 获取模型到 origin/ 并记录运行流程 |
+| `magnetar.stages.export` | `run_mobilenet(task_dir)` → `sample`；`run_generic(task_dir, ...)` → `result` | MobileNet 专用 / 任意模型通用导出（先简后繁自动降级） |
 | `magnetar.stages.toolchain` | `run()` → `pulsar_image` | 验证 Pulsar2 Docker 可用 |
 | `magnetar.stages.compile` | `run(task_dir, target_hw, image)` | Pulsar2 编译 AXMODEL |
 | `magnetar.stages.simulate` | `run(task_dir, sample, image, board=board)` → `metrics` | 精度对分（优先板端 ax_run_model，回退 pulsar2 run） |
-| `magnetar.stages.sdk_gen` | `run_mobilenet_python()`, `run_mobilenet_cpp()` | 生成 Python/C++ SDK |
+| `magnetar.stages.sdk_gen` | `run_mobilenet_python()`, `run_mobilenet_cpp()`；`run_generic_python(task_dir)`, `run_generic_cpp(task_dir)` | 生成 Python/C++ SDK（通用版基于 model_meta + model_flow） |
 | `magnetar.stages.runonboard` | `run(task_dir, sample, hw, pwd)` → `metrics` | 板端部署验证 |
 | `magnetar.stages.package` | `assemble(task_dir, metrics, image)` → `pkg`, `self_test(pkg)` → `result` | 组装面向小白的交付包，含一键脚本 + README + 自测 |
 | `magnetar.stages.publish` | `publish(pkg, target, name, token, org, model)` → `result` | 发布到 GitHub（源码）或 HuggingFace（预编译） |
 
-非 MobileNet 模型：Agent 需自行实现 ONNX 导出逻辑并正确填写 `model_meta.json`。
+非 MobileNet 模型：优先使用 `magnetar.stages.export.run_generic` /
+`scripts/export_onnx.py` 通用导出器（load 脚本约定 `build()` 返回 `(model, example_inputs)`），
+导出失败时依据 `export/export_report.md` 的诊断报告决定人工处理方向；确需手写导出逻辑时
+再自行实现并正确填写 `model_meta.json`。
 
 ## 执行流程
 
@@ -99,15 +102,23 @@ ONNX 必须静态 shape。编译前用 ONNX Runtime 验证。
 - C++ SDK cmake configure 通过
 - `ax_run_model` 仅用于 smoke check，不能替代 SDK 验证
 - PACKAGE 产出独立 git 项目，板端自验证通过
+- 端到端 NPU 跑通后，发布包 SDK 不含 onnxruntime/torch/transformers 回退（NPU 专用版）
 
 ## 爱芯开发知识
 
-- Pulsar2 镜像: https://hf-mirror.com/AXERA-TECH/Pulsar2
-- Pulsar2 文档: https://pulsar2-docs.readthedocs.io/zh-cn/latest/
-- 爱芯 HF: https://hf-mirror.com/AXERA-TECH
-- 爱芯 GitHub: https://github.com/AXERA-TECH
-- AX650 BSP SDK: https://hf-mirror.com/AXERA-TECH/AX650-Community-Hub
-- AX620E 交叉编译器: Arm GNU 9.2 aarch64
-- LLM 编译: https://github.com/AXERA-TECH/ax-llm
-- 本机 Docker 可能已安装 Pulsar2，优先使用最新版本
-- 调试问题记录到 `issues/`，命名 `序号_模型名_阶段_问题简述.md`
+完整资源清单见 `docs/ax-knowledge.md`（仅查证 URL/版本时按需读取，不随每轮全量加载）。
+
+## Token 效率约定
+
+本工作流面向长流程（10 阶段 + 重试 + 回退），上下文是稀缺资源，遵守以下约定：
+
+- 大日志只读尾部 + 关键指标，完整日志落盘不读入
+- 进度/恢复读 `.magnetar-state.json`，不读 task.md 全文
+- 禁止读取二进制产物（.npy/.bin/.axmodel/.onnx/.pt）
+- compile 日志用 `summarize_compile_log()` 取指标，不读全文
+- 查 `issues/` 先读 `INDEX.md`，只读命中的文件
+- 对齐按批确认，缺失项一次列清单带推荐答案
+- 优先 `stages/*.py` 现成函数与 `export_onnx.py` 通用导出器
+- 每阶段一句话更新 `task.md`/`analysis.md`，详细报告只落盘
+
+完整约定见 `.codex/skills/magnetar/SKILL.md` 与 `docs/ax-knowledge.md`。

@@ -30,6 +30,8 @@ workflow:
       - do not include secrets in package artifacts
       human_approval_required: true
     acceptance:
+      # 权威清单：required_artifacts 是产物存在性，checks 是行为/质量性检查。
+      # completion.success_when 引用本处，不再逐条复制，避免三处不同步。
       checks:
       - export/model.onnx exists, has static shapes, and loads in onnxruntime
       - export/model_meta.json contains input and output names, shapes, dtypes, and preprocessing notes
@@ -39,15 +41,13 @@ workflow:
       - Python SDK imports successfully and includes a pyaxengine runnable example
       - C++ SDK configures with CMake and cross-compiles against AX Engine runtime when the aarch64 toolchain is available
       - when BOARD is provided, Python and C++ SDK examples run on a board whose chip_type matches TARGET_HARDWARE
+      - all required_artifacts exist and are non-empty (covers setup.sh, run.sh, compile_pulsar2.sh, READMEs, reports, model_convert files)
       - package/README.md explains model overview, quick start (inference + reproduce), directory layout, performance, and
         limitations
-      - package/setup.sh exists, is executable, and installs all deps in one command
-      - package/run.sh exists, is executable, and runs inference in one command
       - package self_test passes: fresh copy → bash setup.sh → bash run.sh succeeds with no manual intervention
       - package/model_convert/README.md covers env setup, ONNX export, calibration, pulsar2 compile (full command, no placeholders),
         artifact check, and FAQ
       - package/model_convert/requirements.txt exists with all dependencies grouped by category
-      - package/model_convert/compile_pulsar2.sh exists and is directly executable
       - package/python/README.md covers env setup, install, quick run, API, and preprocessing
       - package/cpp/README.md covers env, local/cross build, board deployment, and API
       - package/reports/performance_report.md exists with pipeline timing, model efficiency, latency, and board memory sections
@@ -421,7 +421,7 @@ workflow:
     - acquire_manifest
     timeout_seconds: 900
     retry:
-      max_attempts: 2
+      max_attempts: 1
       retry_on:
       - network_timeout
       - partial_download
@@ -496,7 +496,7 @@ workflow:
     - export_report
     timeout_seconds: 3600
     retry:
-      max_attempts: 2
+      max_attempts: 1
       retry_on:
       - export_failed
       - validation_mismatch
@@ -528,7 +528,7 @@ workflow:
     - ax_runtime_root
     timeout_seconds: 1200
     retry:
-      max_attempts: 2
+      max_attempts: 1
       retry_on:
       - download_failed
       - docker_pull_failed
@@ -555,7 +555,7 @@ workflow:
     - compile_report
     timeout_seconds: 3600
     retry:
-      max_attempts: 2
+      max_attempts: 1
       retry_on:
       - compile_failed
       - pulsar2_transient
@@ -808,7 +808,7 @@ workflow:
     - publish_target
     timeout_seconds: 300
     retry:
-      max_attempts: 2
+      max_attempts: 1
       retry_on:
       - network_transient
       backoff: fixed
@@ -930,33 +930,19 @@ workflow:
     progress_updates: milestone
     audit_log:
       enabled: true
-      include_hidden_steps: true
+      include_hidden_steps: false
     artifacts:
-      record_intermediate_outputs: true
+      record_intermediate_outputs: false
       retention: workflow-local
     required_logs:
     - TASK_DIR/task.md
     - TASK_DIR/analysis.md
   completion:
     success_when:
-    - package/models/model.axmodel exists
-    - package/python exists and import check passed
-    - package/python/README.md covers env install, quick run, and API
-    - package/cpp exists and cmake configure passed
-    - package/cpp/README.md covers local/cross build, board deploy, and API
-    - package/model_convert/export_onnx.py exists
-    - package/model_convert/pulsar2_config.json exists
-    - package/model_convert/requirements.txt exists and is non-empty
-    - package/model_convert/compile_pulsar2.sh exists and is executable
-    - package/model_convert/README.md contains complete pulsar2 command without placeholders
-    - package/reports/simulate_report.md exists
-    - package/reports/performance_report.md exists with all required sections
-    - package/README.md exists and covers model overview, quick start, directory layout, performance, and limitations
+    # 引用 requirement.acceptance（checks + required_artifacts）作为唯一验收权威
+    - all requirement.acceptance.checks pass
+    - all requirement.acceptance.required_artifacts exist
     - RUNONBOARD has been attempted (executed when BOARD provided, skipped when absent) and report exists
-    - no README contains placeholder text
-    - package/setup.sh exists, is executable, and installs deps cleanly
-    - package/run.sh exists, is executable, and runs inference cleanly
-    - self_test() passes: beginner simulation (fresh copy → bash setup.sh → bash run.sh) succeeds
     - publish URL is recorded in task.md
     - publish target (github/huggingface) is documented
     failure_when:

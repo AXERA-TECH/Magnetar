@@ -2,8 +2,9 @@
 
 v2: 编译前自动校验配置，打印参数速查表辅助排查。
     支持直接传入 custom config JSON 覆盖默认配置。
+    summarize_compile_log(): 从 compile.log 提取关键指标，Agent 汇报专用。
 """
-import json, sys
+import json, re, sys
 from pathlib import Path
 
 
@@ -151,6 +152,13 @@ def run(task_dir: Path, target_hw: str, pulsar_image: str,
 
     axmodel = compile_dir / "model.axmodel"
     if not axmodel.is_file():
+        summary = summarize_compile_log(task_dir)
+        from magnetar.stages.state import mark_stage
+        mark_stage(
+            task_dir, "COMPILE", status="blocked",
+            metrics={"compile_errors": summary.get("errors", [])},
+            summary=f"COMPILE 失败，见 compile/compile.log 摘要: {summary.get('errors', [])[:2]}",
+        )
         raise RuntimeError(f"Pulsar2 未生成 {axmodel}")
 
     size_kb = axmodel.stat().st_size / 1024
@@ -163,4 +171,43 @@ def run(task_dir: Path, target_hw: str, pulsar_image: str,
         f"- size: {size_kb:.1f} KB\n",
         encoding="utf-8",
     )
+    from magnetar.stages.state import mark_stage
+    mark_stage(
+        task_dir, "COMPILE",
+        artifacts={"axmodel": str(axmodel)},
+        metrics={"axmodel_size_kb": size_kb},
+        summary=f"COMPILE OK axmodel={size_kb:.1f} KB",
+    )
     print(f"[COMPILE] Done. model.axmodel = {size_kb:.1f} KB")
+
+
+def summarize_compile_log(task_dir: Path) -> dict:
+    """从 compile/compile.log 提取关键指标（MACs/大小/错误行），禁止 Agent 全量读日志。"""
+    log_path = Path(task_dir) / "compile" / "compile.log"
+    result: dict = {"macs": None, "size_bytes": None, "errors": [], "tail": ""}
+    if not log_path.is_file():
+        result["errors"] = ["compile.log 不存在"]
+        return result
+    text = log_path.read_text(encoding="utf-8", errors="replace")
+    axmodel = Path(task_dir) / "compile" / "model.axmodel"
+    result["size_bytes"] = axmodel.stat().st_size if axmodel.is_file() else None
+
+    for pattern, key in [
+        (r"[Mm][Aa][Cc][Ss]?[\s:=]*([\d.]+[eE]?[\d.]*)", "macs"),
+    ]:
+        matches = re.findall(pattern, text)
+        if matches:
+            result[key] = matches[-1]
+
+    seen = set()
+    for line in text.splitlines():
+        low = line.lower()
+        if any(k in low for k in ("error", "failed", "exception", "fatal")) and "errorcode" not in low:
+            trimmed = line.strip()[:240]
+            if trimmed and trimmed not in seen:
+                seen.add(trimmed)
+                result["errors"].append(trimmed)
+        if len(result["errors"]) >= 8:
+            break
+    result["tail"] = text[-1500:]
+    return result

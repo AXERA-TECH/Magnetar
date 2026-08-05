@@ -12,6 +12,12 @@ def run(config: dict) -> Path:
         task_dir = Path.cwd() / "todos" / "work" / f"{ts}-{mn}"
     for d in ["origin", "export", "compile", "simulate", "sdk/python", "sdk/cpp", "runonboard", "package", "cache"]:
         (task_dir / d).mkdir(parents=True, exist_ok=True)
+    from magnetar.stages.state import mark_stage
+    mark_stage(
+        task_dir, "INIT",
+        artifacts={"task_dir": str(task_dir), "config": str(task_dir / "config.json")},
+        summary=f"模型 {config.get('MODEL_NAME', 'N/A')} → {config.get('TARGET_HARDWARE', 'AX650')}",
+    )
     (task_dir / "task.md").write_text(textwrap.dedent(f"""\
         # {config.get('MODEL_NAME', 'Model')} Deployment
         - SOURCE: {config.get('SOURCE', 'N/A')}
