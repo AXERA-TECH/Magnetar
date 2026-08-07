@@ -117,11 +117,11 @@ def _run_pulsar2(task_dir: Path, sample: np.ndarray, onnx_out: np.ndarray,
     ind = sd / "input"; outd = sd / "output"
     ind.mkdir(parents=True, exist_ok=True); outd.mkdir(parents=True, exist_ok=True)
     write_pulsar2_run_input(ind, input_name, sample)
-    log = docker_pulsar2(pulsar_image, str(task_dir.resolve()),
+    docker_pulsar2(pulsar_image, str(task_dir.resolve()),
         "pulsar2 run --model /workspace/compile/model.axmodel "
         "--input_dir /workspace/simulate/input --output_dir /workspace/simulate/output",
-        timeout=900)
-    (sd / "pulsar2_run.log").write_text(log, encoding="utf-8")
+        timeout=900,
+        log_file=sd / "pulsar2_run.log")
     ax_out = read_pulsar2_run_output(outd, output_name, onnx_out.shape)
     metrics = {
         "cosine_similarity": cosine(onnx_out, ax_out),

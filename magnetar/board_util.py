@@ -16,9 +16,14 @@ AX_REMOTE_INFER_URL = os.environ.get(
 def _ssh_base(b): return ["sshpass", "-p", b["password"], "ssh", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-o", "ConnectTimeout=10", "-p", str(b["port"]), f"{b['user']}@{b['host']}"]
 def _scp_base(b): return ["sshpass", "-p", b["password"], "scp", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-P", str(b["port"])]
 
-def ssh(board: dict, cmd: str, timeout=120) -> str:
+def ssh(board: dict, cmd: str, timeout=120, max_tail=None) -> str:
+    """远程执行命令；max_tail 指定时只返回尾部（大输出建议用，完整输出不回上下文）。"""
     proc = subprocess.run(_ssh_base(board) + [cmd], text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=timeout)
-    if proc.returncode != 0: raise RuntimeError(f"Remote failed (exit {proc.returncode}): {cmd}\n{proc.stdout}")
+    if proc.returncode != 0:
+        detail = "\n".join(proc.stdout.splitlines()[- (max_tail or 300):])
+        raise RuntimeError(f"Remote failed (exit {proc.returncode}): {cmd}\n{detail}")
+    if max_tail:
+        return "\n".join(proc.stdout.splitlines()[-max_tail:])
     return proc.stdout
 
 def scp_to(board: dict, src: str | Path, dst: str):

@@ -44,11 +44,14 @@ ACQUIRE → INIT → EXPORT → TOOLCHAIN → COMPILE → SIMULATE → SDK-GEN �
 ## Token 效率约定
 
 - 大日志（compile.log、pulsar2_run.log、SSH 输出）只读尾部 `tail -100` 与关键指标，完整日志落盘不读入
+- docker/SSH 大输出默认截断（`magnetar.docker_util.run` / `board_util.ssh` 的 max_tail），完整日志只落盘，异常只带尾部
 - 编译后调用 `magnetar.stages.compile.summarize_compile_log(task_dir)` 取 MACs/大小/错误行，禁止读 compile.log 全文
 - **禁止读取二进制产物**（.npy/.bin/.axmodel/.onnx/.pt 等）；需要 shape 用 numpy 查询，需要指标用摘要函数
 - 查 `issues/` 先读 `issues/INDEX.md`，只读命中的文件
 - 每阶段只用一句话结论更新 `task.md`/`analysis.md`，详细报告落盘
+- 每阶段只读一次对应 hidden SKILL.md，不重复通读 `workflows/magnetar.yaml`
 - 需求对齐先读 `.magnetarrc` 并探索仓库，缺失项一次性列清单带推荐答案确认
+- 汇报/答复只给结论 + 指标，不贴大段日志
 - 详细爱芯资源见 `docs/ax-knowledge.md`，按需读取
 
 ## 断点续跑

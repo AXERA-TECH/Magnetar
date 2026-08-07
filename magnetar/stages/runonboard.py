@@ -33,12 +33,12 @@ def run(task_dir: Path, sample: np.ndarray, target_hw: str, pwd: str, cpp_binary
     sdk_entry = f"package/python/{pkg_name}/example.py"
     if not (task_dir / "package" / "python" / pkg_name / "example.py").is_file():
         sdk_entry = "package/python/mobilenet_sdk/example.py"
-    py_log = ssh(board, f"cd {rd} && LD_LIBRARY_PATH=/soc/lib PYTHONPATH=$PWD/package/python python3 {sdk_entry} --model package/models/model.axmodel --input input.npy --output-dir py_out", timeout=240)
+    py_log = ssh(board, f"cd {rd} && LD_LIBRARY_PATH=/soc/lib PYTHONPATH=$PWD/package/python python3 {sdk_entry} --model package/models/model.axmodel --input input.npy --output-dir py_out", timeout=240, max_tail=200)
     cpp_log = ""
     if cpp_binary and cpp_binary.exists():
         scp_to(board, cpp_binary, f"{rd}/mobilenet_example")
         ssh(board, f"chmod +x {rd}/mobilenet_example")
-        cpp_log = ssh(board, f"cd {rd} && LD_LIBRARY_PATH=/soc/lib ./mobilenet_example package/models/model.axmodel input.bin cpp_out && ls cpp_out", timeout=240)
+        cpp_log = ssh(board, f"cd {rd} && LD_LIBRARY_PATH=/soc/lib ./mobilenet_example package/models/model.axmodel input.bin cpp_out && ls cpp_out", timeout=240, max_tail=200)
     scp_from(board, f"{rd}/py_out", rb / "py_out")
     py_outputs = sorted((rb / "py_out").glob("output_*.npy"))
     if not py_outputs:

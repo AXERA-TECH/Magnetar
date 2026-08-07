@@ -143,12 +143,12 @@ def run(task_dir: Path, target_hw: str, pulsar_image: str,
     config_path.write_text(json.dumps(config, indent=2, ensure_ascii=False), encoding="utf-8")
     print(f"[COMPILE] input_dtype={input_dtype}  input_shapes={config['input_shapes']}")
 
-    log = docker_pulsar2(
+    docker_pulsar2(
         pulsar_image, str(task_dir.resolve()),
         "pulsar2 build --config /workspace/compile/pulsar2_config.json",
         timeout=3600,
+        log_file=compile_dir / "compile.log",
     )
-    (compile_dir / "compile.log").write_text(log, encoding="utf-8")
 
     axmodel = compile_dir / "model.axmodel"
     if not axmodel.is_file():

@@ -37,7 +37,9 @@ Agent 负责编排和决策。`magnetar/stages/*.py` 提供确定性执行函数
 
 严格按以下顺序推进 10 阶段，不可跳过。每阶段完成后更新 `task.md` 和 `analysis.md`。
 
-状态机（回退/重试/循环）由 `workflows/magnetar.yaml` 控制。
+状态机（回退/重试/循环）由 `workflows/magnetar.yaml` 控制。日常执行按
+`workflows/magnetar-summary.md`（全局读一次）+ `workflows/steps/<阶段>.md`（每阶段读对应片段），
+仅状态机诊断/排障时才读 yaml 全文。
 
 SIMULATE 有板必上板（ax_run_model 秒级），pulsar2 run 仅无板/板端失败时回退；BOARD 未配置时先 `select_board()` 找空闲板，找不到才用仿真。
 
@@ -143,12 +145,16 @@ ONNX 必须静态 shape。编译前用 ONNX Runtime 验证。
 本工作流面向长流程（10 阶段 + 重试 + 回退），上下文是稀缺资源，遵守以下约定：
 
 - 大日志只读尾部 + 关键指标，完整日志落盘不读入
+- docker/SSH 大输出默认截断返回尾部（≤400 行），完整日志落盘（compile.log / pulsar2_run.log），异常也只带尾部 + 日志路径
+- shell 检索用 `rg -l`/`head`/`tail` 限长输出，禁止整段 dump
 - 进度/恢复读 `.magnetar-state.json`，不读 task.md 全文
 - 禁止读取二进制产物（.npy/.bin/.axmodel/.onnx/.pt）
 - compile 日志用 `summarize_compile_log()` 取指标，不读全文
 - 查 `issues/` 先读 `INDEX.md`，只读命中的文件
+- 每阶段只读一次对应 hidden SKILL.md 与 `workflows/steps/<阶段>.md`，全局只读一次 `workflows/magnetar-summary.md`，不重复通读 `workflows/magnetar.yaml` 全文
 - 对齐按批确认，缺失项一次列清单带推荐答案
 - 优先 `stages/*.py` 现成函数与 `export_onnx.py` 通用导出器
 - 每阶段一句话更新 `task.md`/`analysis.md`，详细报告只落盘
+- 汇报/答复只给结论 + 指标，不贴大段日志
 
 完整约定见 `.codex/skills/magnetar/SKILL.md` 与 `docs/ax-knowledge.md`。
