@@ -25,4 +25,6 @@
 - TTS 类模型 COMPILE 失败 → 先看 001/008/009/010/011/012
 - 检测类模型（YOLO）→ 006 + yolo_quantization_and_compile
 - EXPORT 阶段 LayerNorm/opset 失败 → diarizen_pipeline_issues
+- 校准数据 / pulsar2 run / ax_run_model 输入格式问题 → 先看 `docs/input-format-cheatsheet.md`（成功案例固化），再看 piper/013/yolo 量化记录
+- 精度不达标且 INT8/U16/混合精度全失败 → 向用户提议上 QAT（官方 `AXERA-TECH/QAT.axera`），先看 piper_tts_experience §2（QAT→QDQ）与 melotts_pipeline_issues（QAT.axera 记录）
 - 新增 issue 时更新本索引

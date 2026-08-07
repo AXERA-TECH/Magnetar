@@ -46,12 +46,14 @@ def run_custom(task_dir: Path, onnx_path: str | Path):
 
 def run_generic(task_dir: Path, *, model=None, example_inputs=None, load_script=None,
                 arch=None, checkpoint=None, input_names=None, output_names=None,
-                opset=17, model_name="model", sample_variants=4, cosine_threshold=0.99,
+                opset=17, model_name="model", sample_variants=4, calibration_data=None,
+                cosine_threshold=0.99,
                 require_static=True) -> dict:
     """EXPORT 通用编排入口：任意 PyTorch 模型 -> 静态 ONNX + meta + 校准数据。
 
     支持三种模型来源（互斥）：已加载的 ``model`` 对象、``load_script``（最普适）、
     ``arch``（torchvision/timm/hf 架构名，可配 ``checkpoint`` 权重）。
+    ``calibration_data``：真实业务校准数据（目录或样本列表），优先于扰动兜底序列。
     返回 dict: onnx_path / model_meta / attempts / cosine / input_names / output_names。
     全部路径失败时抛 ExportError（诊断报告在 export/export_report.md）。
     """
@@ -68,6 +70,7 @@ def run_generic(task_dir: Path, *, model=None, example_inputs=None, load_script=
         opset=opset,
         model_name=model_name,
         sample_variants=sample_variants,
+        calibration_data=calibration_data,
         cosine_threshold=cosine_threshold,
         require_static=require_static,
     )

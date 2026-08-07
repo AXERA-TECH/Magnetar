@@ -16,7 +16,8 @@
   python scripts/export_onnx.py --task-dir todos/work/demo \
       --load-script load.py \
       --input-names input ids --output-names logits \
-      --opset 17 --calib-samples 8
+      --opset 17 --calib-samples 8 \
+      --calib-dir /path/to/real_samples   # 真实业务校准数据（优先，随机数据仅兜底）
 
 成功后产物在 <task-dir>/export/：model.onnx、model_meta.json、
 calib_data/<input_name>/*.npy + *.tar.gz、export_report.md。
@@ -50,6 +51,7 @@ def main() -> int:
     parser.add_argument("--opset", type=int, default=17, help="首选 opset（失败自动降 13/11）")
     parser.add_argument("--model-name", default="model", help="写入 model_meta.json 的模型名")
     parser.add_argument("--calib-samples", type=int, default=4, help="校准样本数")
+    parser.add_argument("--calib-dir", help="真实业务校准数据目录：单输入取目录/*.npy，多输入取目录/<输入名>/*.npy")
     parser.add_argument("--cosine-threshold", type=float, default=0.99, help="Torch-ONNX 对分阈值")
     args = parser.parse_args()
 
@@ -63,6 +65,7 @@ def main() -> int:
         opset=args.opset,
         model_name=args.model_name,
         sample_variants=args.calib_samples,
+        calibration_data=args.calib_dir or None,
         cosine_threshold=args.cosine_threshold,
     )
     if args.input_shapes:

@@ -16,13 +16,13 @@ Agent 负责编排和决策。`magnetar/stages/*.py` 提供确定性执行函数
 |------|------|------|
 | `magnetar.config` | `load_config()` | 读取 `.magnetarrc` + 环境变量 |
 | `magnetar.docker_util` | `latest_pulsar2_image()`, `docker_pulsar2()` | Docker/Pulsar2 封装 |
-| `magnetar.board_util` | `select_board()`, `ssh()`, `scp_to()`, `scp_from()` | AX 板端操作 |
+| `magnetar.board_util` | `select_board()`, `ssh()`, `scp_to()`, `scp_from()`, `ensure_remote_infer()`, `port_open()` | AX 板端操作（上板前确保 ax-remote-infer 已装，18500 端口可发现板子） |
 | `magnetar.stages.init` | `run(config)` → `task_dir` | 创建 TASK_DIR 结构 |
 | `magnetar.stages.acquire` | `run(task_dir, source)`；`write_model_flow(task_dir, flow)` | 获取模型到 origin/ 并记录运行流程 |
 | `magnetar.stages.export` | `run_mobilenet(task_dir)` → `sample`；`run_generic(task_dir, ...)` → `result` | MobileNet 专用 / 任意模型通用导出（先简后繁自动降级） |
 | `magnetar.stages.toolchain` | `run()` → `pulsar_image` | 验证 Pulsar2 Docker 可用 |
 | `magnetar.stages.compile` | `run(task_dir, target_hw, image)` | Pulsar2 编译 AXMODEL |
-| `magnetar.stages.simulate` | `run(task_dir, sample, image, board=board)` → `metrics` | 精度对分（优先板端 ax_run_model，回退 pulsar2 run） |
+| `magnetar.stages.simulate` | `run(task_dir, sample, image, board=board, target_hw=...)` → `metrics` | 精度对分（有板优先上板 ax_run_model，无板才回退 pulsar2 run） |
 | `magnetar.stages.sdk_gen` | `run_mobilenet_python()`, `run_mobilenet_cpp()`；`run_generic_python(task_dir)`, `run_generic_cpp(task_dir)` | 生成 Python/C++ SDK（通用版基于 model_meta + model_flow） |
 | `magnetar.stages.runonboard` | `run(task_dir, sample, hw, pwd)` → `metrics` | 板端部署验证 |
 | `magnetar.stages.package` | `assemble(task_dir, metrics, image)` → `pkg`, `self_test(pkg)` → `result` | 组装面向小白的交付包，含一键脚本 + README + 自测 |
@@ -39,6 +39,8 @@ Agent 负责编排和决策。`magnetar/stages/*.py` 提供确定性执行函数
 
 状态机（回退/重试/循环）由 `workflows/magnetar.yaml` 控制。
 
+SIMULATE 有板必上板（ax_run_model 秒级），pulsar2 run 仅无板/板端失败时回退；BOARD 未配置时先 `select_board()` 找空闲板，找不到才用仿真。
+
 ## STOP 点
 
 必须暂停等待用户确认：
@@ -47,11 +49,11 @@ Agent 负责编排和决策。`magnetar/stages/*.py` 提供确定性执行函数
 - 模型含动态 shape 且静态化失败
 - Pulsar2 不可用
 - 编译失败需改 ONNX → 退回 EXPORT
-- SIMULATE 精度不达标（先查 `issues/`，无匹配再 STOP）
+- SIMULATE 精度不达标（先查 `issues/`；INT8/U16/混合精度全试过仍不过时，STOP 前先向用户提议上 QAT）
 - 需要私有凭据
 - PUBLISH 需用户确认发布目标、仓库名、凭据
 
-BOARD 缺失不是 STOP——自动跳过 RUNONBOARD。
+BOARD 缺失不是 STOP：SIMULATE 先用 `select_board()` 找空闲板上板，找不到才回退 pulsar2 run；RUNONBOARD 无板自动跳过。
 
 ## 配置
 
@@ -68,6 +70,12 @@ TASK_DIR/
 
 产物不得污染原始模型工程。
 
+## 模型获取
+
+- 模型下载/获取优先 ModelScope（国内 CDN 快，公开模型无需额外凭据），HuggingFace 仅作回退
+- HuggingFace 下载慢时走镜像：`HF_ENDPOINT=https://hf-mirror.com`；大权重可用 ModelScope CDN 分片并行下载（参考 `issues/013_moss-tts-realtime_ax650_pipeline_pitfalls.md`）
+- SOURCE 支持 ModelScope / HuggingFace / Git URL / HTTP URL / 本地文件或目录
+
 ## 关键技术点
 
 ### 校准归一化对齐
@@ -83,9 +91,27 @@ Pulsar2 用 `(img - mean) / std`，libdet 用 `(input - mean) * std`。必须反
 
 ### 量化
 默认 INT8。U16 仅 INT8 cosine < 0.99 时尝试。`highest_mix_precision` 必须为 false。
+校准集尽量用真实业务数据（真实输入/中间特征），随机/扰动数据仅兜底——可能在标定集上好看，真实业务上崩；
+真实数据入口：`run_generic(calibration_data=...)` 或 `scripts/export_onnx.py --calib-dir`。
+
+INT8 / U16 / 混合精度（layer_configs、SmoothQuant、Brecq、Percentile 等）全部尝试仍 cosine < 0.99 时，
+STOP 前先向用户提议上 QAT（量化感知训练）：
+- QAT 框架必须使用官方 `AXERA-TECH/QAT.axera`，不得改用其他 QAT 实现（保证与 Pulsar2 编译链路兼容）
+- 优先 QAT→QDQ ONNX 通道：Pulsar2 的 PTQ 会重新计算 scale，把 QAT 训练收益归零（见 `issues/piper_tts_experience.md` §2）
+- QAT.axera 基础 fake-quant 链路可用，但训练稳定性需先做 toy sanity（见 `issues/melotts_pipeline_issues.md` QAT 追加记录）
+- QAT 需要训练数据和训练时间，成本高；用户确认后才进入，通常退回 EXPORT 重新导出 QDQ ONNX
 
 ### 编译
 ONNX 必须静态 shape。编译前用 ONNX Runtime 验证。
+
+### 输入/输出格式（成功案例固化）
+- 校准数据、pulsar2 run、ax_run_model、axengine 输入格式一律按 `docs/input-format-cheatsheet.md`，禁止反复试格式
+- 代码层单一来源：`magnetar/io_format.py`；`python magnetar/pulsar2_ref.py --cases` 打印成功案例
+- 高频坑：U8 校准 `calibration_std=255`、Numpy 校准 npy 带 batch 维、`tensor_name` 与 ONNX 输入名一致、bin 文件名必须等于 tensor 名
+
+### 板端 ax-remote-infer
+- 上板（SIMULATE 板端通道 / RUNONBOARD）前检查 TCP 18500：daemon 已跑则直接复用；未装则用官方 release 的 `remote_install.sh` 静默安装（缓存 `~/.cache/magnetar/ax-remote-infer`）
+- 装好后可通过扫描 18500 端口发现板子：`select_board()` 在 dashboard 不可用/无空闲板时回退扫描 `MAGNETAR_SCAN_SUBNET`（默认 dashboard 所在 /24）
 
 ### PUBLISH 发布
 - 进入 PUBLISH 阶段时暂停，询问用户：发布到哪里（GitHub/HuggingFace）、仓库名、凭据位置

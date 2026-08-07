@@ -1,6 +1,6 @@
 """SIMULATE: ONNX vs AXMODEL 精度对分。
 
-优先板端 ax_run_model（秒级），不可用时回退 pulsar2 run（分钟级）。
+有板必上板：优先板端 ax_run_model（秒级），找不到板或板端失败时才回退 pulsar2 run（分钟级）。
 """
 import json, os
 from pathlib import Path
@@ -12,8 +12,13 @@ def cosine(a, b):
 
 def run(task_dir: Path, sample: np.ndarray, pulsar_image: str,
         input_name="input", output_name="logits",
-        board: dict | None = None) -> dict:
-    """SIMULATE 主入口：优先板端快速通道，不可用时回退 Pulsar2 仿真。"""
+        board: dict | None = None,
+        target_hw: str | None = None, board_pwd: str = "123456") -> dict:
+    """SIMULATE 主入口：有板优先板端快速通道，无板才回退 Pulsar2 仿真。
+
+    board 为空且给定 target_hw 时，自动用 select_board() 找空闲板；
+    找不到板或板端失败时回退 pulsar2 run。
+    """
     sd = task_dir / "simulate"
     sd.mkdir(parents=True, exist_ok=True)
 
@@ -22,11 +27,20 @@ def run(task_dir: Path, sample: np.ndarray, pulsar_image: str,
     sess = ort.InferenceSession(str(task_dir / "export" / "model.onnx"), providers=["CPUExecutionProvider"])
     onnx_out = sess.run(None, {input_name: sample})[0].astype(np.float32)
 
-    # 2. 尝试板端快速通道
+    # 2. 尝试板端快速通道：先按配置，未配置时自动找空闲板
     metrics = None
+    if board is None and target_hw:
+        try:
+            from magnetar.board_util import select_board
+            board = select_board(target_hw, board_pwd)
+            if board is not None:
+                print(f"[SIMULATE] Auto-selected board {board['host']} ({board.get('chip_type', '')})")
+        except Exception as e:
+            (sd / "board_select_failed.log").write_text(str(e), encoding="utf-8")
+            print(f"[SIMULATE] Board selection failed: {e}, falling back to pulsar2 run")
     if board is not None:
         try:
-            metrics = _run_on_board(task_dir, sample, onnx_out, board, output_name)
+            metrics = _run_on_board(task_dir, sample, onnx_out, board, output_name, input_name)
             _write_report(sd, metrics, method=f"board: {board['host']}")
         except Exception as e:
             (sd / "board_fast_failed.log").write_text(str(e), encoding="utf-8")
@@ -50,9 +64,16 @@ def run(task_dir: Path, sample: np.ndarray, pulsar_image: str,
 
 
 def _run_on_board(task_dir: Path, sample: np.ndarray, onnx_out: np.ndarray,
-                  board: dict, output_name: str) -> dict:
+                  board: dict, output_name: str, input_name: str) -> dict:
     """板端 ax_run_model 快速通道。"""
-    from magnetar.board_util import ssh, scp_to, scp_from
+    from magnetar.board_util import ensure_remote_infer, ssh, scp_to, scp_from
+    from magnetar.io_format import read_ax_run_model_output, write_ax_run_model_input
+
+    # 上板先确保 ax_remote_infer daemon 已装（18500 不通则静默安装），装后可扫端口发现板子
+    try:
+        ensure_remote_infer(board)
+    except Exception as e:
+        print(f"[SIMULATE] ensure_remote_infer 失败（忽略，继续上板）: {e}")
 
     sd = task_dir / "simulate"
     remote = f"/tmp/magnetar_sim_{os.getpid()}"
@@ -64,8 +85,7 @@ def _run_on_board(task_dir: Path, sample: np.ndarray, onnx_out: np.ndarray,
 
     input_dir = sd / "board_input"
     input_dir.mkdir(exist_ok=True)
-    sample.astype(np.float32).tofile(input_dir / "input.bin")
-    (input_dir / "input_list.txt").write_text("input.bin\n", encoding="utf-8")
+    write_ax_run_model_input(input_dir, input_name, sample)
     scp_to(board, input_dir, f"{remote}/input_dir")
 
     # 运行 ax_run_model
@@ -80,11 +100,7 @@ def _run_on_board(task_dir: Path, sample: np.ndarray, onnx_out: np.ndarray,
 
     # 读取 ax_run_model 输出
     output_dir = sd / "board_output"
-    bin_files = sorted(output_dir.glob("*.bin"))
-    if not bin_files:
-        raise RuntimeError("ax_run_model produced no output")
-
-    ax_out = np.fromfile(bin_files[0], dtype=np.float32).reshape(onnx_out.shape)
+    ax_out = read_ax_run_model_output(output_dir, onnx_out.shape)
 
     return {
         "cosine_similarity": cosine(onnx_out, ax_out),
@@ -97,15 +113,16 @@ def _run_pulsar2(task_dir: Path, sample: np.ndarray, onnx_out: np.ndarray,
                  pulsar_image: str, sd: Path, input_name: str, output_name: str) -> dict:
     """Pulsar2 Docker 仿真（慢速回退）。"""
     from magnetar.docker_util import docker_pulsar2
+    from magnetar.io_format import read_pulsar2_run_output, write_pulsar2_run_input
     ind = sd / "input"; outd = sd / "output"
     ind.mkdir(parents=True, exist_ok=True); outd.mkdir(parents=True, exist_ok=True)
-    sample.astype(np.float32).tofile(ind / f"{input_name}.bin")
+    write_pulsar2_run_input(ind, input_name, sample)
     log = docker_pulsar2(pulsar_image, str(task_dir.resolve()),
         "pulsar2 run --model /workspace/compile/model.axmodel "
         "--input_dir /workspace/simulate/input --output_dir /workspace/simulate/output",
         timeout=900)
     (sd / "pulsar2_run.log").write_text(log, encoding="utf-8")
-    ax_out = np.fromfile(outd / f"{output_name}.bin", dtype=np.float32).reshape(onnx_out.shape)
+    ax_out = read_pulsar2_run_output(outd, output_name, onnx_out.shape)
     metrics = {
         "cosine_similarity": cosine(onnx_out, ax_out),
         "mae": float(np.mean(np.abs(onnx_out - ax_out))),

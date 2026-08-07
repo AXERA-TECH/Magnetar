@@ -2,6 +2,10 @@ todo/
 cache/
 **/cache/
 todos/
+tasks/
+
+# 本机配置（含 SOURCE/BOARD 等，模板见 .magnetarrc.example）
+.magnetarrc
 
 # Python / local runtime artifacts
 __pycache__/

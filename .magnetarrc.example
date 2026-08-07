@@ -19,6 +19,10 @@ BOARD=
 # 板端密码（默认 123456）
 BOARD_PASSWORD=123456
 
+# 扫端口发现板子（可选，环境变量 MAGNETAR_SCAN_SUBNET）：dashboard 不可用/无空闲板时，
+# select_board 回退扫描该网段 18500 端口（默认取 dashboard 所在 /24）
+# MAGNETAR_SCAN_SUBNET=10.126.35.0/24
+
 # ===== 可选参数 =====
 
 # 模型名称（留空则从 SOURCE 自动推断）

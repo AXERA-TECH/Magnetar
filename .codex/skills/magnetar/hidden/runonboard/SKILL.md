@@ -10,6 +10,8 @@ description: Hidden stage for magnetar. Optionally deploy AXMODEL and SDK exampl
 
 需要 PyAXEngine 在板端可用。C++ 需先交叉编译（用 `AARCH64_GXX` 环境变量或 BSP 工具链）。
 
+选到板后先 `ensure_remote_infer(board)`：检查 TCP 18500，daemon 未装则用官方 release 静默安装（装后可扫端口发现板子）。
+
 ## 验证
 - Python SDK 板端推理成功，Python/C++ 输出 cosine ≥ 0.98
 - `runonboard_report.md` 含 board host、chip_type、延迟、内存

@@ -12,6 +12,7 @@ description: Hidden stage for magnetar. Compile static ONNX to AXMODEL with Puls
 - `highest_mix_precision` 必须为 `false`
 - `calibration_std` 用 255（非 0.004）——Pulsar2 用 `/std` 公式
 - 编译前确认 ONNX 为静态 shape
+- 校准/输入格式先查 `docs/input-format-cheatsheet.md`（`python magnetar/pulsar2_ref.py --cases`），不要试新格式
 
 ## 验证
 - `compile/model.axmodel` 存在且非空

@@ -14,6 +14,11 @@
 - 获取BSP: https://github.com/AXERA-TECH/ax-pipeline/blob/main/scripts/build_common.sh
 - LLM 编译: https://github.com/AXERA-TECH/ax-llm
 
+## 输入格式速查
+
+- 校准数据 / pulsar2 run / ax_run_model / axengine 输入格式的成功案例固化：`docs/input-format-cheatsheet.md`
+- 代码层单一来源：`magnetar/io_format.py`；`python magnetar/pulsar2_ref.py --cases` 打印成功案例
+
 ## 本机环境
 
 - 本机 Docker 可能已安装 Pulsar2，优先使用最新版本

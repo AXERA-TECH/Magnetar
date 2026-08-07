@@ -255,6 +255,7 @@ def _write_meta_and_calib(
     cosine: float,
     attempts: list[ExportAttempt],
     sample_variants: int,
+    calibration_data=None,
 ) -> dict[str, Any]:
     import onnx
 
@@ -288,13 +289,24 @@ def _write_meta_and_calib(
     }
     (ed / "model_meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
-    # 校准数据：每个输入一份扰动序列 + tar.gz（多输入模型可逐个配置 calibration_dataset）
-    for name, tensor in zip(input_names, sample_tensors):
-        sample_np = np.ascontiguousarray(tensor.detach().cpu().numpy(), dtype=np.float32)
+    # 校准数据：优先真实业务数据（calibration_data），否则扰动序列兜底
+    # （随机/扰动数据可能在标定集上好看，但真实业务上可能崩，只作兜底）
+    calib_sources = _gather_calibration_samples(
+        calibration_data, input_names, sample_tensors, sample_variants
+    )
+    input_shape_map = {i["name"]: i["shape"] for i in inputs_meta}
+    for name, samples in calib_sources.items():
+        shape = input_shape_map.get(name)
+        for arr in samples:
+            if shape is not None and list(np.asarray(arr).shape) != list(shape):
+                raise ValueError(
+                    f"校准样本 {name} shape {list(np.asarray(arr).shape)} != 模型输入 {shape}"
+                    "（真实数据必须与 input_shapes 完全一致，含 batch 维）"
+                )
         calib_dir = ed / "calib_data" / name
         calib_dir.mkdir(parents=True, exist_ok=True)
-        for idx in range(sample_variants):
-            np.save(calib_dir / f"{idx:04d}.npy", np.clip(sample_np + (idx * 0.01), -1, 1).astype(np.float32))
+        for idx, arr in enumerate(samples):
+            np.save(calib_dir / f"{idx:04d}.npy", np.ascontiguousarray(arr, dtype=np.float32))
         tar_path = ed / "calib_data" / f"{name}.tar.gz"
         with tarfile.open(tar_path, "w:gz") as tar:
             for npy in sorted(calib_dir.glob("*.npy")):
@@ -309,6 +321,8 @@ def _write_meta_and_calib(
         f"- Torch-ONNX cosine: {cosine:.6f}",
         f"- Inputs: {', '.join(i['name'] + str(i['shape']) for i in inputs_meta)}",
         f"- Outputs: {', '.join(o['name'] + str(o['shape']) for o in outputs_meta)}",
+        f"- Calibration: {'real 业务数据' if calibration_data is not None else 'perturbed 扰动兜底（建议换真实业务数据）'}"
+        f"（{', '.join(f'{n}:{len(v)}' for n, v in calib_sources.items())} 样本）",
         "",
         "## Export attempts",
         "",
@@ -317,6 +331,63 @@ def _write_meta_and_calib(
         report_lines.append(f"- [{a.status}] {a.path}: {(a.detail or a.error or '')[:240]}")
     (ed / "export_report.md").write_text("\n".join(report_lines) + "\n", encoding="utf-8")
     return meta
+
+
+def _gather_calibration_samples(calibration_data, input_names, sample_tensors, sample_variants):
+    """构造 {input_name: [array, ...]} 校准样本，优先真实业务数据。
+
+    - calibration_data=None          → 扰动兜底序列（不推荐，仅在无真实数据时使用）
+    - calibration_data=<目录>        → 单输入: <目录>/*.npy；多输入: <目录>/<输入名>/*.npy
+    - calibration_data=[array|dict]  → 单输入 array 列表，或多输入 {input_name: array} 列表
+    """
+    if calibration_data is None:
+        out = {}
+        for name, tensor in zip(input_names, sample_tensors):
+            arr = tensor.detach().cpu().numpy() if hasattr(tensor, "detach") else np.asarray(tensor)
+            sample_np = np.ascontiguousarray(arr, dtype=np.float32)
+            out[name] = [
+                np.clip(sample_np + (idx * 0.01), -1, 1).astype(np.float32)
+                for idx in range(sample_variants)
+            ]
+        return out
+
+    if isinstance(calibration_data, (str, Path)):
+        path = Path(calibration_data)
+        if not path.is_dir():
+            raise ValueError(f"calibration_data 必须是包含 .npy 的目录: {path}")
+        out = {}
+        if len(input_names) == 1:
+            name = input_names[0]
+            files = sorted(path.glob("*.npy"))
+            out[name] = [np.load(f) for f in files]
+        else:
+            for name in input_names:
+                sub = path / name
+                files = sorted(sub.glob("*.npy")) if sub.is_dir() else []
+                out[name] = [np.load(f) for f in files]
+    else:
+        out = {name: [] for name in input_names}
+        for sample in calibration_data:
+            if isinstance(sample, dict):
+                for name in input_names:
+                    if name in sample:
+                        out[name].append(np.asarray(sample[name]))
+            else:
+                if len(input_names) != 1:
+                    raise ValueError(
+                        "list 形式的 calibration_data 仅支持单输入；多输入请用 [{'输入名': array}, ...]"
+                    )
+                out[input_names[0]].append(np.asarray(sample))
+
+    counts = {name: len(v) for name, v in out.items()}
+    if any(c == 0 for c in counts.values()):
+        raise ValueError(
+            f"真实校准数据缺失（各输入样本数 {counts}），请检查 calibration_data: {calibration_data}"
+        )
+    if len(set(counts.values())) > 1:  # 多输入逐样本对齐，按最少截齐
+        min_n = min(counts.values())
+        out = {name: v[:min_n] for name, v in out.items()}
+    return out
 
 
 def _export_to_onnx_impl(
@@ -332,6 +403,7 @@ def _export_to_onnx_impl(
     opset: int = 17,
     model_name: str = "model",
     sample_variants: int = 4,
+    calibration_data=None,
     cosine_threshold: float = 0.99,
     require_static: bool = True,
 ) -> dict[str, Any]:
@@ -345,6 +417,7 @@ def _export_to_onnx_impl(
       checkpoint: 权重路径（配合 arch 使用）。
       input_names / output_names: 显式命名；缺省自动 input_0.. / output_0..。
       opset: 首选 opset（失败自动降到 13/11）。
+      calibration_data: 真实业务校准数据（目录或样本列表），优先于扰动兜底序列。
 
     返回 dict: onnx_path / model_meta / attempts / cosine / input_names / output_names。
     全部路径失败时抛 ExportError（含诊断报告路径）。
@@ -497,6 +570,7 @@ def _export_to_onnx_impl(
         cosine=cos_min,
         attempts=attempts,
         sample_variants=sample_variants,
+        calibration_data=calibration_data,
     )
     with (task_dir / "task.md").open("a", encoding="utf-8") as f:
         f.write(f"\n- EXPORT: {onnx_path} (cosine={cos_min:.6f})\n")

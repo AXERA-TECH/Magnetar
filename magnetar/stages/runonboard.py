@@ -4,12 +4,17 @@ from pathlib import Path
 import numpy as np
 
 def run(task_dir: Path, sample: np.ndarray, target_hw: str, pwd: str, cpp_binary: Path | None = None) -> dict | None:
-    from magnetar.board_util import select_board, ssh, scp_to, scp_from
+    from magnetar.board_util import ensure_remote_infer, select_board, ssh, scp_to, scp_from
     board = select_board(target_hw, pwd)
     if board is None:
         from magnetar.stages.state import mark_stage
         mark_stage(task_dir, "RUNONBOARD", status="skipped", summary="BOARD 未配置，自动跳过")
         return None
+    # 上板先确保 ax_remote_infer daemon 已装（18500 不通则静默安装），装后可扫端口发现板子
+    try:
+        ensure_remote_infer(board)
+    except Exception as e:
+        print(f"[RUNONBOARD] ensure_remote_infer 失败（忽略，继续上板）: {e}")
     rb = task_dir / "runonboard"; rb.mkdir(parents=True, exist_ok=True)
     in_npy = rb / "input.npy"; in_bin = rb / "input.bin"
     np.save(in_npy, sample.astype(np.float32)); sample.astype(np.float32).tofile(in_bin)

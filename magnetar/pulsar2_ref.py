@@ -2,6 +2,7 @@
 
 用法:
   python magnetar/pulsar2_ref.py            # 打印校准速查表
+  python magnetar/pulsar2_ref.py --cases    # 打印成功案例（输入格式固化）
   python magnetar/pulsar2_ref.py --save-ref  # 生成参考配置到参考文件
 """
 import json, os, re, sys, textwrap
@@ -93,6 +94,116 @@ def print_calib_cheatsheet(image_or_enums):
             print(f"  ── {note}")
 
 
+# ─── 成功案例（输入格式固化） ───
+
+SUCCESS_CASES = [
+    {
+        "name": "通用单输入 FP32（MobileNetV2 / 通用导出器）",
+        "scenario": "非视觉或已在 CPU 侧归一化好的输入，Numpy 校准",
+        "config": {
+            "quant": {
+                "input_configs": [{
+                    "tensor_name": "<ONNX 输入名>",
+                    "calibration_dataset": "/workspace/export/calib_data/<输入名>.tar.gz",
+                    "calibration_format": "Numpy",
+                    "calibration_size": 30,
+                    "calibration_mean": [],
+                    "calibration_std": [],
+                }],
+                "calibration_method": "MinMax",
+                "highest_mix_precision": False,
+            },
+            "input_processors": [{
+                "tensor_name": "<ONNX 输入名>",
+                "tensor_layout": "NCHW",
+                "src_dtype": "FP32",
+                "src_layout": "NCHW",
+            }],
+        },
+        "data": "tar.gz 内含 {0000..NNNN}.npy，float32、带 batch 维、shape 与 input_shapes 完全一致",
+        "source": "magnetar/export_onnx.py + tests/test_magnetar_mobilenet_workflow.py（已跑通）",
+    },
+    {
+        "name": "视觉 U8 输入（YOLO，参照 yolov8l_ylb.json）",
+        "scenario": "图像输入，预处理（归一化/布局转换）由工具链嵌入 axmodel",
+        "config": {
+            "quant": {
+                "input_configs": [{
+                    "tensor_name": "input",
+                    "calibration_dataset": "/workspace/export/calib_data/input.tar",
+                    "calibration_format": "Image",
+                    "calibration_size": 32,
+                    "calibration_mean": [0, 0, 0],
+                    "calibration_std": [255, 255, 255],  # uint8/255 → [0,1]
+                }],
+                "calibration_method": "MinMax",
+                "highest_mix_precision": False,
+            },
+            "input_processors": [{
+                "tensor_name": "input",
+                "tensor_format": "RGB",
+                "tensor_layout": "NHWC",
+                "src_format": "RGB",
+                "src_dtype": "U8",
+                "src_layout": "NHWC",
+            }],
+        },
+        "data": "JPEG/PNG 打包成 tar；工具链自动插 AxDequantizeLinear(U8→FP32) + AxNormalize + AxTranspose(NHWC→NCHW)",
+        "note": "calibration_std 必须是 255（非 0.004）；FP32 直通则 src_dtype=FP32、src_layout=NCHW、mean/std 显式 [0,0,0]/[1,1,1] 禁用归一化",
+        "source": "magnetar/stages/compile.py（input_dtype==U8 分支）+ issues/yolo_quantization_and_compile.md",
+    },
+    {
+        "name": "多输入校准（PiperTTS：z_p / mask）",
+        "scenario": "每个输入独立配置 input_configs + tar.gz",
+        "config": {
+            "quant": {
+                "input_configs": [
+                    {"tensor_name": "z_p",  "calibration_dataset": "/workspace/.../z_p.tar.gz",  "calibration_format": "Numpy", "calibration_size": 8},
+                    {"tensor_name": "mask", "calibration_dataset": "/workspace/.../mask.tar.gz", "calibration_format": "Numpy", "calibration_size": 8},
+                ],
+                "calibration_method": "MinMax",
+                "highest_mix_precision": False,
+            },
+        },
+        "data": "跑原 ONNX 采集中间特征（sess.run 拿各输入），存 npy 后分别打包；校准集建议 4-32 个样本",
+        "source": "issues/piper_tts_experience.md §3（多输入余弦 0.987）",
+    },
+    {
+        "name": "手写校准（MOSS-TTS-Realtime）",
+        "scenario": "手工构造校准集（非通用导出器）",
+        "config": {
+            "quant": {
+                "input_configs": [{
+                    "tensor_name": "<ONNX 输入名>",   # 必须与 ONNX graph.input 一致
+                    "calibration_dataset": "/workspace/.../xxx.tar.gz",
+                    "calibration_format": "Numpy",
+                    "calibration_size": 16,
+                }],
+            },
+        },
+        "data": "tar.gz 内 {input_name}/{index:05d}.npy 也可被接受（通用导出器用根目录 npy）；样本必须带 batch 维（如 [1,512,17]）；tensor_name 必须与 ONNX 输入名一致，校准文件名可不同",
+        "source": "issues/013_moss-tts-realtime_ax650_pipeline_pitfalls.md",
+    },
+]
+
+
+def print_success_cases() -> None:
+    """打印已验证的输入格式成功案例（固化参考）。"""
+    for i, c in enumerate(SUCCESS_CASES, 1):
+        print()
+        print(f"{'─' * 72}")
+        print(f"  案例 {i}: {c['name']}")
+        print(f"{'─' * 72}")
+        print(f"  场景: {c['scenario']}")
+        print(f"  数据: {c['data']}")
+        if c.get("note"):
+            print(f"  注意: {c['note']}")
+        print(f"  来源: {c['source']}")
+        print("  配置:")
+        import json as _json
+        print(_json.dumps(c["config"], ensure_ascii=False, indent=4).replace("\n", "\n    "))
+
+
 # ─── 参考配置生成 ───
 
 _REF = """{{
@@ -176,6 +287,11 @@ def generate_reference_config(image_or_enums, target_hardware="AX650"):
 def validate_config(config: dict, enums: dict) -> list[str]:
     """校验配置字典，返回警告列表（空列表 = 配置通过）。"""
     warnings = []
+    input_names = [
+        s.split(":", 1)[0].strip()
+        for s in str(config.get("input_shapes", "")).replace(",", " ").split()
+        if ":" in s
+    ]
 
     mt = config.get("model_type", "ONNX")
     if mt not in enums.get("ModelType", {}):
@@ -190,6 +306,31 @@ def validate_config(config: dict, enums: dict) -> list[str]:
         cf = ic.get("calibration_format", "")
         if cf and cf not in enums.get("DataFormat", {}):
             warnings.append(f"calibration_format '{cf}' 不在: {_fmt_enum(enums, 'DataFormat')}")
+        tn = ic.get("tensor_name", "")
+        if input_names and tn and tn != "DEFAULT" and tn not in input_names:
+            warnings.append(
+                f"input_configs.tensor_name '{tn}' 与 input_shapes 中的输入名不一致（{input_names}），"
+                "校准数据会匹配不上"
+            )
+        cs = ic.get("calibration_size")
+        if cs is not None and not (4 <= int(cs) <= 32):
+            warnings.append(f"calibration_size={cs} 超出建议范围 [4, 32]")
+        if cf == "Numpy" and not ic.get("calibration_mean") and not ic.get("calibration_std"):
+            pass  # FP32 直通合法
+        if cf == "Numpy" and ic.get("calibration_mean") and not ic.get("calibration_std"):
+            warnings.append("Numpy 校准建议 mean/std 成对出现，避免归一化配置不完整")
+
+    for ip in config.get("input_processors", []):
+        if ip.get("src_dtype") == "U8":
+            matched = any(
+                ic.get("tensor_name") == ip.get("tensor_name") and ic.get("calibration_std")
+                for ic in q.get("input_configs", [])
+            )
+            if not matched:
+                warnings.append(
+                    f"input_processors[{ip.get('tensor_name')}] 为 U8 输入，对应 input_configs 的 "
+                    "calibration_std 应为 [255,255,255]（uint8/255 → [0,1]），当前缺失或为空"
+                )
 
     for lc in q.get("layer_configs", []):
         for field in ["data_type", "weight_data_type", "output_data_type"]:
@@ -218,8 +359,13 @@ def main():
     if "--help" in sys.argv or "-h" in sys.argv:
         print("Pulsar2 配置参考工具")
         print("  python magnetar/pulsar2_ref.py            # 打印校准速查表")
+        print("  python magnetar/pulsar2_ref.py --cases    # 打印成功案例（输入格式固化）")
         print("  python magnetar/pulsar2_ref.py --ref      # 输出参考配置 JSON")
         print("  python magnetar/pulsar2_ref.py --save     # 保存参考配置到文件")
+        return
+
+    if "--cases" in sys.argv:
+        print_success_cases()
         return
 
     image = _get_image()

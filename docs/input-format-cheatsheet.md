@@ -1,0 +1,169 @@
+# 输入/输出格式速查（成功案例固化）
+
+> 目的：消除 Pulsar2 校准数据与 ax_run_model 输入格式的反复试错。
+> 下列格式均来自仓库内已验证实现/成功案例 + 官方文档，按此执行，不要再试新格式。
+>
+> 配套代码：`magnetar/io_format.py`（单一来源助手）；`python magnetar/pulsar2_ref.py --cases`（成功案例速查）
+
+## TL;DR
+
+| 场景 | 格式 | 依据 |
+|------|------|------|
+| Pulsar2 校准（通用 Numpy） | tar/tar.gz 内含 `.npy`（float32、带 batch 维、shape 与模型输入一致） | MobileNetV2 测试 / 通用导出器 |
+| Pulsar2 校准（视觉 U8） | JPEG/PNG tar + mean/std=`[0,0,0]`/`[255,255,255]` + `src_dtype=U8`、`src_layout=NHWC` | YOLO（yolov8l_ylb.json 参考） |
+| 多输入校准 | 每个输入独立 `input_configs` + tar.gz，`tensor_name` = ONNX 输入名 | PiperTTS |
+| pulsar2 run 仿真 | 输入 `{tensor名}.bin`（float32 raw），输出 `{输出名}.bin` | 官方文档 + 测试 |
+| ax_run_model 板端 | `input_list.txt` 每行一个 bin 文件名 + `-m -i -o -l`，输出 `*.bin` | 官方文档 + simulate.py |
+| axengine SDK | `np.ascontiguousarray(float32)`，dtype 从 `get_inputs()[0].dtype` 读 | PiperTTS / MOSS-TTS |
+
+## 1. Pulsar2 校准数据（量化输入）
+
+- **校准样本优先真实业务数据**（真实输入或 ONNX 中间特征，如 PiperTTS 案例）；随机/扰动数据仅兜底——可能在标定集上好看，真实业务上崩
+- 真实数据入口：`run_generic(calibration_data=<目录|样本列表>)` / `scripts/export_onnx.py --calib-dir`；未提供时导出器生成扰动序列，并在 `export_report.md` 标注 `perturbed 兜底`
+
+### 1.1 通用 Numpy 校准（案例：MobileNetV2 / 通用导出器，已验证）
+
+校准集 = tar/tar.gz 内的 npy 文件，float32、**带 batch 维**、与 `input_shapes` 完全一致：
+
+```bash
+mkdir -p calib_data/input && cd calib_data/input
+# 每个样本: np.save(f"{i:04d}.npy", sample_float32_with_batch)   # 如 [1,3,224,224]
+tar czf ../input.tar.gz *.npy
+```
+
+对应配置（`magnetar/export_onnx.py` 与 `compile.py` 默认即此）：
+
+```json
+{
+  "quant": {
+    "input_configs": [{
+      "tensor_name": "input",
+      "calibration_dataset": "/workspace/export/calib_data/input.tar.gz",
+      "calibration_format": "Numpy",
+      "calibration_size": 30,
+      "calibration_mean": [],
+      "calibration_std": []
+    }],
+    "calibration_method": "MinMax",
+    "highest_mix_precision": false
+  },
+  "input_processors": [{
+    "tensor_name": "input",
+    "tensor_layout": "NCHW",
+    "src_dtype": "FP32",
+    "src_layout": "NCHW"
+  }]
+}
+```
+
+### 1.2 多输入校准（案例：PiperTTS，z_p / mask）
+
+- 每个输入**独立** tar.gz + 独立 `input_configs` / `input_processors`
+- 样本可用原 ONNX 采集中间特征生成（`sess.run` 拿到各输入后 `np.save`）
+- `calibration_size` 建议 4–32（仓库默认 30 / Piper 用 8）
+- 参考：`issues/piper_tts_experience.md` §3（多输入余弦 0.987）
+
+### 1.3 视觉 U8 输入（案例：YOLO）
+
+```json
+{
+  "quant": {
+    "input_configs": [{
+      "tensor_name": "input",
+      "calibration_dataset": "/workspace/export/calib_data/input.tar",
+      "calibration_format": "Image",
+      "calibration_size": 32,
+      "calibration_mean": [0, 0, 0],
+      "calibration_std": [255, 255, 255]
+    }],
+    "calibration_method": "MinMax",
+    "highest_mix_precision": false
+  },
+  "input_processors": [{
+    "tensor_name": "input",
+    "tensor_format": "RGB",
+    "tensor_layout": "NHWC",
+    "src_format": "RGB",
+    "src_dtype": "U8",
+    "src_layout": "NHWC"
+  }]
+}
+```
+
+- 工具链自动嵌入 `AxDequantizeLinear`（U8→FP32）、`AxNormalize`、`AxTranspose`（NHWC→NCHW），编译日志 "Building native" 后可确认
+- **`calibration_std` 必须是 255**（uint8/255 → [0,1]），写成 0.004 会让校准输入变成 [0,65025] → 板端全零
+- FP32 直通（CPU 侧已归一化）：`src_dtype=FP32`、`src_layout=NCHW`，且 `mean/std` **必须显式** `[0,0,0]`/`[1,1,1]`，否则工具链仍会按 calibration 默认值插入归一化
+- 与 libdet 的对齐（AGENTS.md 同款）：
+
+| 组件 | 配置 | 输入范围 |
+|------|------|----------|
+| Pulsar2 校准 | `calibration_std = 255` | uint8/255 = [0,1] |
+| libdet 推理 | `std = 1/255` | uint8 × (1/255) = [0,1] |
+
+### 1.4 手写校准（案例：MOSS-TTS-Realtime）
+
+- tar.gz 内 `{input_name}/{index:05d}.npy` 也可被接受（通用导出器用根目录 npy），两者样本都必须带 batch 维（如 `[1,512,17]`）
+- **`tensor_name` 必须与 ONNX `graph.input` 一致**（校准文件名可以不同）；用 `onnx inspect --io model.onnx` 核对
+- 参考：`issues/013_moss-tts-realtime_ax650_pipeline_pitfalls.md` §3
+
+## 2. pulsar2 run 仿真（SIMULATE 回退路径）
+
+```bash
+pulsar2 run --model /workspace/compile/model.axmodel \
+  --input_dir /workspace/simulate/input --output_dir /workspace/simulate/output
+```
+
+- 输入：`simulate/input/{输入tensor名}.bin`（float32 raw）——**文件名必须与 tensor 名一致**
+- 输出：`simulate/output/{输出tensor名}.bin`（float32 raw），按 ONNX 输出 shape reshape
+- 代码：`magnetar/io_format.py::write_pulsar2_run_input / read_pulsar2_run_output`，调用点 `simulate.py::_run_pulsar2`
+- 案例：`tests/test_magnetar_mobilenet_workflow.py::_simulate_and_compare`（验证通过）
+
+## 3. ax_run_model 板端（SIMULATE 快速通道）
+
+```bash
+ax_run_model -m model.axmodel -i input_dir -o output -l input_dir/input_list.txt -w 0 -r 1
+```
+
+- `-w 0`：预热 0 次；`-r 1`：跑 1 次（仓库快速通道配置）
+- 输入目录：`{输入tensor名}.bin`（float32 raw）+ `input_list.txt`（每行一个 bin 文件名）
+- 输出：目录下 `*.bin`（float32 raw），单输出模型取第一个文件，reshape 成 ONNX 输出 shape
+- 官方另一种目录结构（多输入/大批量时参考）：`input/0/data.bin` + `list.txt` 每行一个文件夹名，配合 `--use-tensor-name`
+- 代码：`magnetar/io_format.py::write_ax_run_model_input / read_ax_run_model_output`，调用点 `simulate.py::_run_on_board`
+- 注意：`Get model type failed`（issues/010）= 板端 ax 运行时与 Pulsar2 7.0 产物不兼容，换运行时/降版本，与输入格式无关
+
+## 4. axengine SDK 板端输入
+
+PiperTTS 成功用法：
+
+```python
+import axengine as axe
+s = axe.InferenceSession("model.axmodel", providers=["AxEngineExecutionProvider"])
+inputs = {s.get_inputs()[0].name: np.ascontiguousarray(data)}
+out = s.run(None, inputs)[0]
+```
+
+- 输入必须 C-contiguous（`np.ascontiguousarray`）
+- 用 `get_inputs()[0].name`，不要硬编码输入名
+- MOSS-TTS（axengine 0.1.3）：无 `get_io_info`，dtype 从 `NodeArg.dtype` 读并强制转换
+
+## 5. 常见错误对照表
+
+| 现象 | 根因 | 正确姿势 |
+|------|------|----------|
+| 校准/板端输出全零 | `calibration_std=0.004`（即 1/255） | U8 用 `[255,255,255]` |
+| 校准匹配不上 / 编译报 tensor 缺失 | `tensor_name` ≠ ONNX 输入名 | 用 `onnx inspect --io model.onnx` 核对 |
+| Numpy 校准 shape 报错 | npy 少 batch 维或与 `input_shapes` 不一致 | 每个 npy 与输入 shape 完全一致 |
+| pulsar2 run 无输出 | bin 文件名 ≠ tensor 名 | 文件名为 ONNX 输入/输出名 |
+| 多输入只配了一个校准 | `input_configs` 缺项 | 每个输入独立配置 |
+| 板端输出错位 | reshape 用错 shape | 用 ONNX 输出 shape（`model_meta.json`） |
+| 板端 `Get model type failed` | ax 运行时与编译产物不兼容 | 换匹配的 ax 运行时 |
+| 视觉模型精度差 | `src_layout`/`src_dtype` 与校准不一致 | U8+NHWC 或 FP32+NCHW 显式一致 |
+| FP32 直通被偷偷归一化 | `input_processors` 没显式 mean/std | 显式 `[0,0,0]`/`[1,1,1]` |
+
+## 权威依据
+
+- Pulsar2 官方文档：
+  - [Common configuration examples（校准格式/多输入/预处理嵌入）](https://pulsar2-docs.readthedocs.io/en/latest/appendix/advanced_config_examples.html)
+  - [ax_run_model 模型评测工具](https://pulsar2-docs.readthedocs.io/zh-cn/latest/other_tools/ax_run_model.html)
+- 仓库实现：`magnetar/export_onnx.py`、`magnetar/stages/compile.py`、`magnetar/stages/simulate.py`、`tests/`
+- 经验记录：`issues/piper_tts_experience.md`、`issues/013_moss-tts-realtime_ax650_pipeline_pitfalls.md`、`issues/yolo_quantization_and_compile.md`

@@ -568,7 +568,7 @@ workflow:
   - id: simulate
     kind: agent
     skill: .codex/skills/magnetar/hidden/simulate/SKILL.md
-    description: Compare ONNX and AXMODEL simulation outputs. Prefers board ax_run_model (fast) over pulsar2 run (slow) when BOARD is available.
+    description: Compare ONNX and AXMODEL outputs; prefer board ax_run_model (fast) whenever a board is available; when BOARD is unset, try select_board(TARGET_HARDWARE) to find an idle board; ensure ax_remote_infer daemon (port 18500) is installed on the board before running; fall back to pulsar2 run (slow) only when no board is reachable.
     depends_on:
     - stage_review_compile
     parallel_group: null
@@ -579,6 +579,7 @@ workflow:
     - TASK_DIR
     - BOARD
     - BOARD_PASSWORD
+    - TARGET_HARDWARE
     outputs:
     - simulate_report
     - accuracy_metrics
@@ -614,7 +615,7 @@ workflow:
     on_failure:
       action: rollback
       target_step: compile
-      reason: 精度不达标。SIMULATE阶段已搜索issues/目录：有已知方案则自动应用修复后回退到COMPILE；无方案则STOP等待用户决策后再回退
+      reason: 精度不达标。SIMULATE阶段已搜索issues/目录：有已知方案则自动应用修复后回退到COMPILE；无方案且INT8/U16/混合精度均失败时，先向用户提议上QAT（官方AXERA-TECH/QAT.axera，QAT→QDQ ONNX通道）再STOP等待决策
     visibility: user_visible
   - id: sdk_gen
     kind: agent
@@ -729,7 +730,7 @@ workflow:
   - id: runonboard
     kind: agent
     skill: .codex/skills/magnetar/hidden/runonboard/SKILL.md
-    description: Validate Python and C++ SDKs on the AX board. Skipped when BOARD is not provided.
+    description: Validate Python and C++ SDKs on the AX board. Ensures ax_remote_infer daemon (port 18500) is installed on the board. Skipped when BOARD is not provided.
     depends_on:
     - sdk_gen
     parallel_group: null
