@@ -33,12 +33,15 @@ def write_model_flow(task_dir: Path, flow: dict) -> Path:
       "postprocess_code": "可选：Python 代码，定义 postprocess(*arrays) -> 结果（模型输出到用户结果）",
       "preprocess_note": "预处理说明（resize/归一化等），写入 SDK README",
       "postprocess_note": "后处理说明（topk/解码等），写入 SDK README",
+      "sdk_interface": "可选：原版模型调用约定 {'entry': '函数/方法名', 'args': '入参顺序与格式', 'returns': '输出结构'}，SDK 示例尽量镜像原版入口",
       "verified": true
     }
 
     SDK 生成时（sdk_gen.run_generic_python/cpp）读取本文件：
     - 模型接口（输入输出名/shape/dtype）以 export/model_meta.json 为权威
     - 预处理/后处理与示例输入以本文件为准，保证与 ACQUIRE 验证过的运行流程一致
+    - 前后处理必须对齐原版模型管线（preprocess_code/postprocess_code 来自原版实现），
+      调用方式尽量对齐原版入口（sdk_interface），不得为省事改成直通/自定义
     """
     origin = task_dir / "origin"
     origin.mkdir(parents=True, exist_ok=True)

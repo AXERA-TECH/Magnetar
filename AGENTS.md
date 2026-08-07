@@ -132,9 +132,12 @@ ONNX 必须静态 shape。编译前用 ONNX Runtime 验证。
 - Pulsar2 配置 `highest_mix_precision` 为 false
 - Python SDK `import <sdk>` 通过，默认 `AxEngineExecutionProvider`
 - C++ SDK cmake configure 通过
+- SDK 前后处理对齐原版模型（`model_flow.json` 的 preprocess/postprocess 来自原版管线，ACQUIRE 阶段验证过），调用方式尽量对齐原版入口（`sdk_interface` 记录入参顺序/输入格式/输出结构），禁止为省事改成直通/自定义
 - `ax_run_model` 仅用于 smoke check，不能替代 SDK 验证
 - PACKAGE 产出独立 git 项目，板端自验证通过
-- 端到端 NPU 跑通后，发布包 SDK 不含 onnxruntime/torch/transformers 回退（NPU 专用版）
+- 交付包 Python/C++ 尽量减少依赖：端到端 NPU 跑通后 SDK 仅依赖 numpy + pyaxengine，
+  不含 onnxruntime/torch/transformers 等回退；CPU fallback 尽量不做，能端到端 NPU 就端到端
+  （RUNONBOARD 通过即强制 NPU-only 交付，package 装配时会校验无回退依赖）
 
 ## 爱芯开发知识
 

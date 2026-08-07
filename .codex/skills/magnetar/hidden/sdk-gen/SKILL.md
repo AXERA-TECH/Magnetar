@@ -24,6 +24,9 @@ MobileNet 直接调用：
 一致性保障（自动）：
 - 模型接口（输入输出名/shape/dtype）以 `export/model_meta.json` 为权威
 - 预处理/后处理与示例输入以 `origin/model_flow.json`（ACQUIRE 阶段记录）为准
+- **前后处理对齐原版**：preprocess/postprocess 必须来自原版模型管线（ACQUIRE 验证过），
+  **调用方式尽量对齐原版**（`model_flow.sdk_interface` 记录入口/入参顺序/输入格式/输出结构，
+  example.py 镜像原版调用方式）；禁止为省事改成直通/自定义
 - `example_input` 缺失、`preprocess_code`/`postprocess_code` 语法错误时抛错，
   避免生成与真实运行流程不一致的 SDK
 - 生成后务必用 `example.py --model ... --input <真实样本>` 验证一次（板端或 ORT 回退）
@@ -36,6 +39,10 @@ MobileNet 直接调用：
 - `package.assemble()` 会自动把 `package/python` 下的通用 SDK 替换为 NPU-only 版
   （`inference.py` 只 import axengine，非 AX 环境直接报错并提示在板端运行）
 - 交付 SDK 的依赖仅为 `numpy + pyaxengine`，不包含 onnxruntime/torch/transformers
+- **依赖最小化**：交付包 Python/C++ 尽量减少依赖（C++ 只链 ax_engine/ax_sys；
+  Python 只 numpy+pyaxengine），opencv/pillow 等仅当原版前处理确实需要时才进 requirements.txt
+- **CPU fallback 尽量不做**：能端到端 NPU 就端到端；仅 RUNONBOARD 未跑通时才允许保留开发版回退，
+  且交付说明中必须标注“未做端到端 NPU 验证”
 - 源目录 `sdk/python/` 保留开发版（含 ORT 回退）供本机逻辑验证，不进交付包
 - 需要严格版时也可直接调用 `run_generic_python(task_dir, strict_npu=True)`
 

@@ -39,7 +39,9 @@ workflow:
       - simulate/simulate_report.md records ONNX vs AXMODEL metrics with multi-input mean ± std
       - default cosine similarity is at least 0.99 unless task-specific metrics justify acceptance
       - Python SDK imports successfully and includes a pyaxengine runnable example
+      - SDK pre/post-processing matches the original model pipeline in model_flow.json; example calling convention mirrors the original model entry as much as possible
       - C++ SDK configures with CMake and cross-compiles against AX Engine runtime when the aarch64 toolchain is available
+      - delivered package SDK minimizes dependencies: when RUNONBOARD passed, Python SDK depends only on numpy + pyaxengine with no onnxruntime/torch/transformers fallback; C++ links only AX Engine runtime
       - when BOARD is provided, Python and C++ SDK examples run on a board whose chip_type matches TARGET_HARDWARE
       - all required_artifacts exist and are non-empty (covers setup.sh, run.sh, compile_pulsar2.sh, READMEs, reports, model_convert files)
       - package/README.md explains model overview, quick start (inference + reproduce), directory layout, performance, and

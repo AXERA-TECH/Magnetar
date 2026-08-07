@@ -109,11 +109,18 @@ def _load_meta_and_flow(task_dir: Path, meta: dict | None, flow: dict | None):
 
 
 def _validate_flow(task_dir: Path, flow: dict) -> list[str]:
-    """校验 model_flow 可被 SDK 复现；致命问题抛 ValueError，返回警告列表。"""
+    """校验 model_flow 可被 SDK 复现；致命问题抛 ValueError，返回警告列表。
+
+    一致性约束：SDK 前后处理必须对齐原版管线（model_flow 在 ACQUIRE 阶段记录并验证），
+    调用方式尽量对齐原版模型入口，禁止为省事改成直通/自定义预处理。
+    """
     warnings: list[str] = []
     task_dir = Path(task_dir)
     if not flow:
-        warnings.append("未提供 model_flow.json：预处理/后处理按直通生成，仅支持 float32 输入")
+        warnings.append(
+            "未提供 model_flow.json：预处理/后处理按直通生成，仅支持 float32 输入；"
+            "若原版模型有预处理/后处理，必须先记录 model_flow 并对齐原版再生成 SDK"
+        )
         return warnings
     example = flow.get("example_input")
     if example:
@@ -129,6 +136,16 @@ def _validate_flow(task_dir: Path, flow: dict) -> list[str]:
                 ast.parse(code)
             except SyntaxError as exc:
                 raise ValueError(f"model_flow.{key} 语法错误: {exc}") from exc
+        else:
+            warnings.append(
+                f"model_flow 未记录 {key}：SDK 将按直通生成；"
+                "若原版模型有对应处理，必须在 model_flow.json 补齐并对齐原版后再生成 SDK"
+            )
+    if flow.get("verified") is not True:
+        warnings.append("model_flow.verified 不为 true：前后处理未在 ACQUIRE 阶段验证，与原版运行流程一致性无法保证")
+    sdk_iface = flow.get("sdk_interface")
+    if sdk_iface is not None and not isinstance(sdk_iface, dict):
+        warnings.append("model_flow.sdk_interface 应为 dict（记录原版调用约定：入口/入参顺序/输入格式/输出结构）")
     if flow.get("inputs") and flow.get("inputs") != flow.get("_meta_inputs"):
         # inputs 字段可选；若提供则应与 meta 校验，见 run_generic_python
         pass

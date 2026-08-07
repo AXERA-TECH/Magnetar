@@ -36,6 +36,23 @@ def assemble(task_dir: Path, metrics: dict, pulsar_image: str,
         if npu_verified:
             from magnetar.stages.sdk_gen import make_npu_only_sdk_dir
             make_npu_only_sdk_dir(pkg / "python")
+            # 交付约束：端到端 NPU 跑通后禁止 CPU 回退，校验交付 SDK 依赖最小化
+            # 匹配真实 import（避免命中说明文案里的字样，如 NPU-only 模板的报错提示）
+            forbidden = (
+                "import onnxruntime", "from onnxruntime",
+                "import torch", "from torch",
+                "import transformers", "from transformers",
+            )
+            leaked = [
+                str(inf.relative_to(pkg))
+                for inf in (pkg / "python").glob("*_sdk/inference.py")
+                if any(f in inf.read_text(encoding="utf-8") for f in forbidden)
+            ]
+            if leaked:
+                raise RuntimeError(
+                    f"交付包 SDK 仍含 CPU 回退依赖（{leaked}），违反最小依赖/端到端 NPU 约束；"
+                    "请用 run_generic_python(strict_npu=True) 重新生成"
+                )
             (pkg / "NPU_ONLY_SDK.md").write_text(
                 "本交付包已通过端到端 NPU 验证，Python SDK 仅依赖 pyaxengine，"
                 "不含 onnxruntime/torch/transformers 等运行时回退。\n",
@@ -160,7 +177,7 @@ def _write_setup_sh(pkg: Path, has_py: bool, has_cpp: bool):
         if py_req.exists():
             lines.append(f"pip install -r python/requirements.txt")
         else:
-            lines.append("pip install pyaxengine opencv-python numpy pillow")
+            lines.append("pip install pyaxengine numpy")
 
     if has_cpp:
         lines.append("")
