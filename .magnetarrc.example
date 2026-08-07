@@ -2,6 +2,11 @@
 # 复制为 .magnetarrc 并按需修改。
 # Codex 会在启动时读取此文件，已配置的项不再重复提问。
 
+# 多任务并发时：本文件只放公共默认（凭据/工具链/行为选项），任务参数
+# （SOURCE/TARGET_HARDWARE/MODEL_NAME/BOARD/TASK_DIR）在 INIT 阶段固化到
+# 各 TASK_DIR/config.json，后续阶段读 config.json（load_task_config），
+# 不要为了新任务反复修改本文件，避免并发任务互相覆盖。
+
 # ===== 必需参数 =====
 
 # 模型来源: Git 仓库 | HuggingFace repo | 本地目录 | 单文件路径 | 可下载 URL

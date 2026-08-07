@@ -59,6 +59,10 @@ BOARD 缺失不是 STOP：SIMULATE 先用 `select_board()` 找空闲板上板，
 
 优先读取 `.magnetarrc`（shell 风格 key=value），环境变量可覆盖。详见 `.magnetarrc.example`。
 
+多任务并发隔离约定：
+- `.magnetarrc` 只放公共默认（凭据/工具链/镜像/行为选项），任务参数（SOURCE/TARGET_HARDWARE/MODEL_NAME/BOARD/TASK_DIR）不要在里面反复改写
+- 每个任务 INIT 时把任务参数固化到 `TASK_DIR/config.json`；之后各阶段一律用 `magnetar.config.load_task_config(task_dir)` 读取，禁止并发任务互相改写 `.magnetarrc`
+
 ## 目录约定
 
 ```

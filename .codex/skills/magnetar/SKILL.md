@@ -59,3 +59,5 @@ ACQUIRE → INIT → EXPORT → TOOLCHAIN → COMPILE → SIMULATE → SDK-GEN �
 ## 配置
 
 读取 `.magnetarrc`（shell 风格 key=value），环境变量可覆盖。详见 `.magnetarrc.example`。
+INIT 后各阶段读 `TASK_DIR/config.json`（`magnetar.config.load_task_config(task_dir)`），
+任务参数以 INIT 快照为准，`.magnetarrc` 仅作公共默认，多任务并发互不影响。
