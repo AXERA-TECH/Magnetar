@@ -3,8 +3,15 @@
 Token 效率约定：大输出（编译/仿真日志）默认只返回尾部，完整日志通过 log_file 落盘，
 禁止把整段日志带回上下文。
 """
-import os, re, subprocess
+import os, re, subprocess, sys
 from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+PROTO_CACHE_ROOT = Path(os.environ.get("MAGNETAR_PROTO_CACHE", REPO_ROOT / "cache" / "pulsar2"))
+PROTO_ROOTS = [
+    "/opt/pulsar2/yamain/config",       # Pulsar2 6.0
+    "/opt/pulsar2/axnn/yamain/config",  # Pulsar2 7.0
+]
 
 DEFAULT_TAIL_LINES = 400
 
@@ -73,23 +80,11 @@ def make_writable(task_dir: str):
     uid, gid = os.getuid(), os.getgid()
     run(["docker", "run", "--rm", "-v", f"{task_dir}:/workspace", img, "-lc", f"chown -R {uid}:{gid} /workspace"], timeout=120)
 
-def get_pulsar2_proto_enums(image: str) -> dict:
-    """从 Pulsar2 Docker 镜像读取 common.proto，解析所有枚举定义。
-
-    Returns:
-        {"DataType": {"U8": 1, "FP32": 10, ...}, "ColorSpace": {...}, ...}
-    """
-    for proto_path in ["/opt/pulsar2/yamain/config/common.proto", "/opt/pulsar2/axnn/yamain/config/common.proto"]:
-        try:
-            raw = run(["docker", "run", "--rm", "--entrypoint", "cat", image, proto_path], timeout=30)
-            break
-        except RuntimeError:
-            continue
-    else:
-        raise RuntimeError(f"Cannot find common.proto in Pulsar2 image {image}")
+def parse_proto_enums(text: str) -> dict[str, dict[str, int]]:
+    """解析 proto 文本中的 enum 定义，返回 {"EnumName": {"MEMBER": 0, ...}}。"""
     enums: dict[str, dict[str, int]] = {}
     current = None
-    for line in raw.splitlines():
+    for line in text.splitlines():
         m = re.match(r'^enum\s+(\w+)\s*\{', line)
         if m:
             current = m.group(1)
@@ -101,6 +96,57 @@ def get_pulsar2_proto_enums(image: str) -> dict:
         if line.strip() == '}' and current:
             current = None
     return enums
+
+
+def _proto_cache_dir(image: str) -> Path:
+    tag = re.sub(r'[^A-Za-z0-9_.-]', '_', image)
+    return PROTO_CACHE_ROOT / tag
+
+
+def _read_proto_from_image(image: str, proto_name: str) -> str:
+    """从镜像读取指定 proto 文件（兼容 6.0/7.0 两种目录布局）。"""
+    last_err = None
+    for root in PROTO_ROOTS:
+        path = f"{root}/{proto_name}"
+        try:
+            return run(["docker", "run", "--rm", "--entrypoint", "cat", image, path], timeout=30)
+        except RuntimeError as e:
+            last_err = e
+    raise RuntimeError(f"Cannot find {proto_name} in Pulsar2 image {image} ({last_err})")
+
+
+def extract_pulsar2_proto(image: str, force: bool = False) -> dict[str, Path]:
+    """提取 Pulsar2 镜像的 common.proto + build_config.proto 到本地缓存。
+
+    后续工作流（枚举校验、配置生成）优先读本地文件，避免反复 docker run；
+    人也可以直接打开缓存目录阅读 proto 内容。
+
+    Args:
+        image: Pulsar2 Docker 镜像名（如 pulsar2:7.0-lite）
+        force: 强制重新提取（默认本地已有则跳过 docker）
+
+    Returns:
+        {"common.proto": Path, "build_config.proto": Path}
+    """
+    out_dir = _proto_cache_dir(image)
+    files = {name: out_dir / name for name in ("common.proto", "build_config.proto")}
+    if not force and all(p.is_file() for p in files.values()):
+        return files
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for name, path in files.items():
+        try:
+            raw = _read_proto_from_image(image, name)
+            path.write_text(raw, encoding="utf-8")
+        except OSError as e:
+            print(f"[docker_util] 警告: 缓存 {path} 写入失败（{e}），本次仍使用 docker 读取", file=sys.stderr)
+    return files
+
+
+def get_pulsar2_proto_enums(image: str) -> dict:
+    """读取 Pulsar2 common.proto 枚举（优先本地缓存），返回枚举 dict。"""
+    files = extract_pulsar2_proto(image)
+    raw = files["common.proto"].read_text(encoding="utf-8")
+    return parse_proto_enums(raw)
 
 # 缓存 proto 枚举，避免重复拉取
 _proto_cache: dict[str, dict] = {}

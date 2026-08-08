@@ -12,8 +12,15 @@
    `hidden` cosine 0.23；`key_delta_0` 精确匹配而其余输出错误。
    NPU1/NPU2/NPU3、Cos/Sin 量化与否、单/多子图均复现相同数值，指向
    Pulsar2 7.0-lite 后端对大 KV cache（1024 长度）FP32 图的编译缺陷。
-3. **板端无法验证**：可用 AX650 板（10.126.35.143）根分区 100% 满、
-   ax_run_model 报 "Get model type failed"（运行时与 7.0 产物不兼容）。
+3. **板端无法验证**：可用 AX650 板（10.126.35.143）根分区 100% 满，
+   ax_run_model 报 "Get model type failed"。
+
+> 勘误：原结论“运行时与 Pulsar2 7.0 产物不兼容”已删除。2026-08-05 在
+> AX650N 板端验证 GCRN（pulsar2:7.0-lite 编译的 NPU3 模型）时，
+> axengine 2.12.0s 运行正常，`/usr/local/lib/libax_engine.so`（V3.6.4）
+> 与 `/soc/lib/libax_engine.so`（V3.10.2）两种运行库均可加载并推理
+> 7.0-lite 产物；"Get model type failed" 更可能是板端环境（根分区满、
+> 运行库缺失/损坏）导致，与版本匹配无关。
 
 ## 已排除
 

@@ -40,21 +40,17 @@ def get_enums(image):
     """解析 common.proto + build_config.proto 中所有枚举。
 
     Returns: {"DataType": {"U8": 1, "FP32": 10}, "QuantMethod": {"MinMax": 0, ...}, ...}
+
+    proto 文件优先从本地缓存（cache/pulsar2/<image>/）读取，缺失时自动从
+    Docker 镜像提取（见 magnetar.docker_util.extract_pulsar2_proto）。
     """
+    from magnetar.docker_util import extract_pulsar2_proto, parse_proto_enums
+
+    files = extract_pulsar2_proto(image)
     enums = OrderedDict()
-    # Pulsar2 6.0 与 7.0 的 proto 目录不同，依次尝试
-    proto_roots = ["/opt/pulsar2/yamain/config",
-                   "/opt/pulsar2/axnn/yamain/config"]
-    for root in proto_roots:
-        texts = {}
-        for name in ("common.proto", "build_config.proto"):
-            texts[name] = _read_proto(image, f"{root}/{name}")
-        if not any(texts.values()):
-            continue
-        for text in texts.values():
-            for k, v in _parse_enums(text).items():
-                enums[k] = v
-        break
+    for path in (files["common.proto"], files["build_config.proto"]):
+        for k, v in parse_proto_enums(path.read_text(encoding="utf-8")).items():
+            enums[k] = v
     return enums
 
 
