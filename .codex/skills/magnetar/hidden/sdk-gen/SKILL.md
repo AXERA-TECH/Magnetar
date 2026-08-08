@@ -46,12 +46,26 @@ MobileNet 直接调用：
 - 源目录 `sdk/python/` 保留开发版（含 ORT 回退）供本机逻辑验证，不进交付包
 - 需要严格版时也可直接调用 `run_generic_python(task_dir, strict_npu=True)`
 
+## LLM 分支（model_route=llm）
+
+模型是自回归/类 LLM 时，SDK 不再基于 pyaxengine，改为：
+- **Python SDK**：OpenAI 兼容 HTTP 客户端——类 `LLMClient(api_url, model_name)`，
+  `chat(messages, **kwargs)` / `stream()` 调 `/v1/chat/completions`；依赖**仅 requests**
+  （requirements.txt 只写 `requests`，不含 pyaxengine/onnxruntime/torch/transformers）；
+  调用约定对齐原模型 chat 模板（`model_flow.json` 的 sdk_interface）；
+  `example.py` 启动/复用板端 `axllm serve` 后调用客户端打印回复；
+- **C++ SDK**：可选，OpenAI 兼容 HTTP 客户端（libcurl），cmake configure 通过即可，
+  不强求上板链接 AX runtime；
+- 板端运行前置：`axllm serve <model_dir>`（RUNONBOARD 负责安装与启动）。
+
 ## 验证
 - Python `import <model>_sdk` 成功
 - C++ `cmake configure` 成功
 - Python `example.py` 用 ACQUIRE 真实样本跑通，输出与 ONNX/板端一致
 - `requirements.txt` 覆盖完整依赖
 - 发布包（RUNONBOARD 通过后）SDK 不含 `import onnxruntime`，依赖仅 numpy + pyaxengine
+- LLM 分支：`import <sdk>` 通过；requirements.txt 依赖仅 requests；
+  对 `axllm serve` 的 `/v1/chat/completions` 冒烟一次
 
 ## STOP
 - 无（此阶段总是可执行）

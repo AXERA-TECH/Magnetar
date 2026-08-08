@@ -52,6 +52,14 @@ result = magnetar.stages.publish.publish(
   无 `onnxruntime`/`torch`/`transformers` 运行时回退，依赖仅 `numpy + pyaxengine`
 - 检查 `package/NPU_ONLY_SDK.md` 存在且 `python/*_sdk/inference.py` 无 `import onnxruntime`
 
+## LLM 分支（model_route=llm）
+
+- 发布内容以 axllm 模型目录（`models/` 内 config.json + tokenizer + *.axmodel）
+  与 OpenAI 兼容 Python SDK（依赖仅 requests）为主；
+- GitHub：model_convert 含可复现 `llm_build.sh`（完整 llm_build2 命令）；
+- HuggingFace：上传模型目录 + SDK + setup.sh/run.sh（含 axllm 安装脚本说明）；
+- README frontmatter 的 `pipeline_tag` 用 `text-generation`。
+
 ## 失败处理
 
 - 凭据缺失 → 返回错误信息，重新询问用户

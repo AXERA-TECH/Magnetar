@@ -38,6 +38,21 @@ package/
 └── reports/            # export/compile/simulate/runonboard 报告
 ```
 
+## LLM 分支（model_route=llm）
+
+交付内容适配 axllm：
+- `models/` 放 **axllm 模型目录**（`config.json` + tokenizer + 逐层/post `*.axmodel`
+  + embedding bin + `model_meta.json`），不再要求单个 `model.axmodel`；
+- `model_convert/` 放可复现 `llm_build.sh`（完整 `pulsar2 llm_build2` 命令 +
+  `embed_process.sh` + axllm config 生成说明）+ README 覆盖
+  权重获取 → llm_build2 → embedding/tokenizer 处理 → 板端 axllm serve；
+- `setup.sh`：安装 axllm（`curl -fsSL
+  https://raw.githubusercontent.com/AXERA-TECH/ax-llm/axllm/install.sh | bash`）
+  或检查已装；`run.sh`：`axllm serve models/ --port 8000 &` 后运行
+  `python/demo.py`（OpenAI 兼容客户端）并打印回复；
+- `python/requirements.txt` 依赖仅 `requests`；`reports/performance_report.md`
+  记录 TTFT / token 速率 / 逐层 cosine（替代张量对分指标）。
+
 ## README 编写规范
 
 - **开头一句话说清这是什么模型**（精度 + 速度 + 大小）

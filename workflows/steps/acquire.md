@@ -7,4 +7,8 @@
 - timeout: 900s；retry: 1 次（network_timeout / partial_download，指数退避）
 - on_failure: ask_user（SOURCE 无效 / 私有凭据缺失）
 - 要点：模型获取优先 ModelScope，HuggingFace 仅回退；拿到模型后写 `origin/model_flow.json`
+- LLM 检测：扫描 `origin/config.json` 的 architectures/model_type（含嵌套 text_config）、
+  README.md 的 pipeline_tag、model_flow 的 task；命中自回归/LLM 特征时在
+  manifest.json 记录 `route_hint: {"llm": true, "reason": "..."}`，
+  供后置 `model_route` gate 判定（函数：`magnetar.stages.llm.classify`）
 - 后置：`stage_review_acquire`（AUTO_APPROVE=true 时跳过）

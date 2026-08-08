@@ -48,6 +48,24 @@ PULSAR2_IMAGE=
 # Pulsar2 本地可执行文件路径（留空则使用 Docker）
 PULSAR2_BIN=
 
+# ===== LLM / 自回归模型（ax-llm 路由，可选）=====
+# 模型被判定为自回归/类 LLM 时自动走 ax-llm 路径（pulsar2 llm_build2 + axllm），
+# 以下参数仅在需要覆盖默认值时设置：
+
+# ax-llm 仓库与分支（板端 axllm 安装源）
+# AX_LLM_REPO=https://github.com/AXERA-TECH/ax-llm.git
+# AX_LLM_BRANCH=axllm
+
+# ax-llm-build 仓库（embedding 处理工具）
+# AX_LLM_BUILD_REPO=https://github.com/AXERA-TECH/ax-llm-build.git
+
+# llm_build2 参数
+# LLM_MAX_CONTEXT=1024      # decode 最大 attention 长度
+# LLM_PREFILL_LEN=0         # prefill 总 token 长度
+# LLM_PREFILL_STEP_SIZE=    # 每个 prefill 子图 token 数（如 128）
+# LLM_WEIGHT_TYPE=s8        # s8 | s4 | bf16 | fp16 | fp32（大模型可试 s4）
+# LLM_HIDDEN_STATE_TYPE=bf16  # bf16 | fp16 | fp32
+
 # ===== C++ BSP / 交叉编译器 =====
 
 # AX650 BSP SDK 下载地址（留空使用默认）

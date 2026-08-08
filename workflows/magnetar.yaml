@@ -16,6 +16,9 @@ workflow:
       cost_budget: no paid external actions without user approval
       technology:
       - Pulsar2 for ONNX to AXMODEL compilation
+      - 'LLM/自回归模型路由：Pulsar2 llm_build2（直接编译 HuggingFace 权重为逐层
+        axmodel）+ AXERA-TECH/ax-llm（axllm 分支）板端运行/服务；通用模型仍走
+        ONNX -> pulsar2 build 路径'
       - Pulsar2 Docker image fallback from https://hf-mirror.com/AXERA-TECH/Pulsar2/tree/main
       - HuggingFace downloads must use hf-mirror with HF_ENDPOINT=https://hf-mirror.com
       - Python virtual environments must be managed with uv
@@ -46,6 +49,11 @@ workflow:
       - all required_artifacts exist and are non-empty (covers setup.sh, run.sh, compile_pulsar2.sh, READMEs, reports, model_convert files)
       - package/README.md explains model overview, quick start (inference + reproduce), directory layout, performance, and
         limitations
+      - 'LLM 路由（model_route=llm）额外检查：compile/llm_model_dir 含 config.json、
+        tokenizer 文件、逐层 *.axmodel 与 post axmodel；export/model_meta.json 记录
+        route=llm 与 llm_build2 自带逐层 cosine（min ≥ 0.99）；有板时 axllm serve
+        通过 OpenAI 兼容接口完成 ≥3 组 prompt 语义验证；LLM Python SDK 依赖仅 requests
+        （不含 onnxruntime/torch/transformers/pyaxengine），板端运行依赖 axllm'
       - package self_test passes: fresh copy → bash setup.sh → bash run.sh succeeds with no manual intervention
       - package/model_convert/README.md covers env setup, ONNX export, calibration, pulsar2 compile (full command, no placeholders),
         artifact check, and FAQ
@@ -92,6 +100,10 @@ workflow:
       AXERA-TECH/Pulsar2 Docker image fallback through hf-mirror.
     - uv is required for every task virtual environment; missing uv blocks the workflow instead of falling back to venv, virtualenv,
       or conda.
+    - 'ax-llm 官方支持 AX650A/AX650N（SDK >= 3.6.2）与 AX630C（SDK >= 3.0.0）；
+      AX620E/AX8850 等其他芯片需按 pulsar2 llm_build2 --chip 支持与 ax-llm 实际验证
+      结果为准，默认 AX650'
+    - 'pulsar2 llm_build2 需要 Pulsar2 >= 6.0；LLM 路由在 TOOLCHAIN 阶段校验该子命令'
     - RUNONBOARD is optional unless BOARD is provided.
     - Dry-run mode (MODE=dry-run) stops after init to present the plan; no large file downloads or compilation occur.
     - ax_run_model is only a model smoke check and never substitutes for Python/C++ SDK execution.
@@ -213,6 +225,62 @@ workflow:
     source: external
     validation:
     - defaults to https://hf-mirror.com/AXERA-TECH/Pulsar2/tree/main when local Pulsar2 is unavailable
+  - id: AX_LLM_REPO
+    type: url
+    required: false
+    source: environment
+    validation:
+    - defaults to https://github.com/AXERA-TECH/ax-llm.git
+    description: ax-llm 仓库地址（LLM 路由板端运行/服务）
+  - id: AX_LLM_BRANCH
+    type: text
+    required: false
+    source: environment
+    validation:
+    - defaults to axllm
+    description: ax-llm 分支，默认 axllm
+  - id: AX_LLM_BUILD_REPO
+    type: url
+    required: false
+    source: environment
+    validation:
+    - defaults to https://github.com/AXERA-TECH/ax-llm-build.git
+    description: ax-llm-build 仓库（embedding 处理工具，LLM 路由编译辅助）
+  - id: LLM_MAX_CONTEXT
+    type: int
+    required: false
+    source: environment
+    validation:
+    - positive integer, defaults to 1024
+    description: llm_build2 --max_context（decode 最大 attention 长度）
+  - id: LLM_PREFILL_LEN
+    type: int
+    required: false
+    source: environment
+    validation:
+    - non-negative integer, defaults to 0
+    description: llm_build2 --prefill_len（prefill 总 token 长度）
+  - id: LLM_PREFILL_STEP_SIZE
+    type: int
+    required: false
+    source: environment
+    validation:
+    - positive integer, optional
+    description: llm_build2 --prefill_step_size（每个 prefill 子图 token 数）
+  - id: LLM_WEIGHT_TYPE
+    type: text
+    required: false
+    source: environment
+    validation:
+    - s8, s4, bf16, fp16, fp32
+    description: llm_build2 --weight_type，默认 s8；大模型可试 s4（GPTQ INT4 风格 w4a16）
+  - id: LLM_HIDDEN_STATE_TYPE
+    type: text
+    required: false
+    source: environment
+    validation:
+    - bf16, fp16, fp32
+    description: llm_build2 --hidden_state_type，默认 bf16
   - id: BOARD
     type: text
     required: false
@@ -246,6 +314,13 @@ workflow:
     validation:
     - exists
     - non_empty
+  - id: axmodel_dir
+    type: directory
+    destination: TASK_DIR/package/models/
+    required: false
+    validation:
+    - 'route=llm 时存在：含 config.json、tokenizer 文件、逐层 *.axmodel、post axmodel'
+    - 'route=llm 时 model_meta.json 的 route=llm'
   - id: python_sdk
     type: directory
     destination: TASK_DIR/package/python/
@@ -478,12 +553,41 @@ workflow:
       action: ask_user
       target_step: null
     visibility: user_visible
+  - id: model_route
+    kind: gate
+    skill: ''
+    description: '模型路由判定：调用 magnetar.stages.llm.classify(origin, ...)。
+      route=llm（自回归/类 LLM，含 hybrid 组合模型）→ 后续 EXPORT/COMPILE/SIMULATE/
+      SDK-GEN/RUNONBOARD/PACKAGE 走 ax-llm 分支；route=general → 原通用 ONNX 路径。
+      hybrid 模型（如 AR-TTS）需先确认 LLM/AR 子模型拆分方案，无法确认时 STOP。'
+    depends_on:
+    - dry_run_check
+    parallel_group: null
+    inputs:
+    - origin_path
+    - acquire_manifest
+    - MODEL_NAME
+    - SOURCE
+    outputs:
+    - model_route
+    timeout_seconds: null
+    retry:
+      max_attempts: 0
+      retry_on: []
+      backoff: none
+    on_failure:
+      action: ask_user
+      target_step: null
+      reason: hybrid 组合模型无法自动确认 LLM/AR 子模型拆分方案
+    visibility: user_visible
   - id: export
     kind: agent
     skill: .codex/skills/magnetar/hidden/export/SKILL.md
-    description: Export static ONNX, validate against source model, generate metadata and calibration data
+    description: '分支执行：route=general → 导出静态 ONNX 并对分验证；route=llm →
+      不导出 ONNX，直接验证 HuggingFace 权重可推理并生成 llm_build.sh（可复现
+      llm_build2 命令），hybrid 时同时导出非 LLM 子模型 ONNX'
     depends_on:
-    - dry_run_check
+    - model_route
     parallel_group: null
     inputs:
     - origin_path
@@ -491,6 +595,7 @@ workflow:
     - TASK_DIR
     - HF_ENDPOINT
     - uv
+    - model_route
     outputs:
     - onnx_path
     - model_meta_json
@@ -507,12 +612,13 @@ workflow:
     on_failure:
       action: ask_user
       target_step: null
-      reason: 多次导出失败，需要用户介入调整模型或提供替代方案
+      reason: 多次导出失败，需要用户介入调整模型或提供替代方案；LLM 路由下 llm_build2
+        不支持该架构时需用户决定是否回退通用 ONNX 路径
     visibility: user_visible
   - id: toolchain
     kind: agent
     skill: .codex/skills/magnetar/hidden/toolchain/SKILL.md
-    description: Verify Pulsar2 and prepare chip-specific C++ BSP/toolchain (AX650 BSP SDK / AX620E Arm GNU)
+    description: Verify Pulsar2 and prepare chip-specific C++ BSP/toolchain (AX650 BSP SDK / AX620E Arm GNU); LLM 路由时额外确认 pulsar2 llm_build2 可用（Pulsar2 ≥ 6.0）并准备 ax-llm-build 工具
     depends_on:
     - stage_review_export
     parallel_group: null
@@ -524,6 +630,7 @@ workflow:
     - TARGET_HARDWARE
     - CXX_BSP_URL
     - HF_ENDPOINT
+    - model_route
     outputs:
     - pulsar2_command
     - cxx_toolchain_file
@@ -542,7 +649,10 @@ workflow:
   - id: compile
     kind: agent
     skill: .codex/skills/magnetar/hidden/compile/SKILL.md
-    description: Compile ONNX to AXMODEL using Pulsar2
+    description: '分支执行：route=general → pulsar2 build 编译 ONNX 为 AXMODEL；
+      route=llm → pulsar2 llm_build2 直接编译 HuggingFace 权重为逐层 axmodel +
+      post axmodel + bf16 embedding，并用 ax-llm-build embed_process.sh 处理 embedding、
+      生成 axllm config.json/tokenizer，产出 compile/llm_model_dir'
     depends_on:
     - toolchain
     parallel_group: null
@@ -552,8 +662,10 @@ workflow:
     - calibration_dir
     - TARGET_HARDWARE
     - pulsar2_command
+    - model_route
     outputs:
     - axmodel_path
+    - axmodel_dir
     - compile_report
     timeout_seconds: 3600
     retry:
@@ -565,12 +677,16 @@ workflow:
     on_failure:
       action: rollback
       target_step: export
-      reason: Compile失败通常需要调整ONNX导出策略（opset、shape、算子选择等），回退到EXPORT重试
+      reason: Compile失败通常需要调整ONNX导出策略（opset、shape、算子选择等），回退到EXPORT重试；LLM 路由下 llm_build2 失败（架构/算子/head_dim 不支持）也回退 EXPORT 调整参数或由用户决定回退通用路径
     visibility: user_visible
   - id: simulate
     kind: agent
     skill: .codex/skills/magnetar/hidden/simulate/SKILL.md
-    description: Compare ONNX and AXMODEL outputs; prefer board ax_run_model (fast) whenever a board is available; when BOARD is unset, try select_board(TARGET_HARDWARE) to find an idle board; ensure ax_remote_infer daemon (port 18500) is installed on the board before running; fall back to pulsar2 run (slow) only when no board is reachable.
+    description: '分支执行：route=general → 对比 ONNX 与 AXMODEL 输出（有板优先
+      ax_run_model，无板 pulsar2 run）；route=llm → 板端安装 axllm 并 axllm serve
+      compile/llm_model_dir，通过 OpenAI 兼容接口做 ≥3 组 prompt 语义验证（greedy，
+      记录 TTFT/生成 token 数/耗时）；无板时回退 llm_build2 --check_level 2 自带
+      校验（逐层 decode/prefill cosine），板端语义验证留到 RUNONBOARD'
     depends_on:
     - stage_review_compile
     parallel_group: null
@@ -582,6 +698,7 @@ workflow:
     - BOARD
     - BOARD_PASSWORD
     - TARGET_HARDWARE
+    - model_route
     outputs:
     - simulate_report
     - accuracy_metrics
@@ -596,12 +713,14 @@ workflow:
     on_failure:
       action: rollback
       target_step: compile
-      reason: 仿真工具失败或输出异常，回退到COMPILE调整量化配置
+      reason: 仿真工具失败或输出异常，回退到COMPILE调整量化配置（LLM 路由调整
+        weight_type/hidden_state_type/context 参数后重新 llm_build2）
     visibility: user_visible
   - id: accuracy_gate
     kind: gate
     skill: ''
-    description: Decide whether simulation accuracy is acceptable
+    description: 'Decide whether accuracy is acceptable (general: cosine >= 0.99;
+      llm: llm_build2 逐层 cosine min >= 0.99 + 有板时 axllm serve 语义验证通过)'
     depends_on:
     - simulate
     parallel_group: null
@@ -617,14 +736,43 @@ workflow:
     on_failure:
       action: rollback
       target_step: compile
-      reason: 精度不达标。SIMULATE阶段已搜索issues/目录：有已知方案则自动应用修复后回退到COMPILE；无方案且INT8/U16/混合精度均失败时，先向用户提议上QAT（官方AXERA-TECH/QAT.axera，QAT→QDQ ONNX通道）再STOP等待决策
+      reason: 精度不达标。SIMULATE阶段已搜索issues/目录：有已知方案则自动应用修复后回退到COMPILE；通用模型 INT8/U16/混合精度均失败时提议 QAT（官方 AXERA-TECH/QAT.axera）；LLM 路由下先调 weight_type（s8→s4）/hidden_state_type 重编译，仍不达标再 STOP 提议 QAT 或回退通用路径
+    visibility: user_visible
+  - id: llm_route_acceptance
+    kind: gate
+    skill: ''
+    description: 'LLM 路由专项验收（model_route=llm 时启用，general 自动跳过）：
+      compile/llm_model_dir 完整（config.json + tokenizer + 逐层/post axmodel +
+      embedding bin）；export/model_meta.json route=llm 且 compile_cosine.min >= 0.99；
+      有板时 axllm serve OpenAI 兼容接口 ≥3 组 prompt 全非空；无板时记录 N/A
+      并保证 RUNONBOARD 用板端验证补齐'
+    depends_on:
+    - accuracy_gate
+    parallel_group: null
+    inputs:
+    - model_route
+    - accuracy_metrics
+    - axmodel_dir
+    outputs:
+    - llm_acceptance
+    timeout_seconds: null
+    retry:
+      max_attempts: 0
+      retry_on: []
+      backoff: none
+    on_failure:
+      action: rollback
+      target_step: compile
+      reason: LLM 产物或精度校验不满足（逐层 cosine < 0.99 / 模型目录缺文件），回退 COMPILE 调整参数
     visibility: user_visible
   - id: sdk_gen
     kind: agent
     skill: .codex/skills/magnetar/hidden/sdk-gen/SKILL.md
-    description: Generate Python and C++ customer SDKs sequentially, validate both after generation
+    description: '分支执行：route=general → pyaxengine Python SDK + AX runtime C++ SDK；
+      route=llm → OpenAI 兼容 HTTP 客户端 Python SDK（依赖仅 requests）+ 可选 C++ HTTP
+      客户端，板端运行依赖 axllm serve'
     depends_on:
-    - accuracy_gate
+    - llm_route_acceptance
     parallel_group: null
     inputs:
     - axmodel_path
@@ -632,6 +780,7 @@ workflow:
     - MODEL_NAME
     - cxx_toolchain_file
     - ax_runtime_root
+    - model_route
     outputs:
     - python_sdk_path
     - cpp_sdk_path
@@ -732,7 +881,10 @@ workflow:
   - id: runonboard
     kind: agent
     skill: .codex/skills/magnetar/hidden/runonboard/SKILL.md
-    description: Validate Python and C++ SDKs on the AX board. Ensures ax_remote_infer daemon (port 18500) is installed on the board. Skipped when BOARD is not provided.
+    description: 'Validate Python and C++ SDKs on the AX board. route=general →
+      现有 pyaxengine/AX runtime 验证；route=llm → 板端安装 axllm（ax-llm install.sh），
+      axllm serve 模型目录后运行 OpenAI 兼容 SDK 客户端，记录 TTFT/token 速率/内存。
+      Ensures ax_remote_infer daemon (port 18500) when general route. Skipped when BOARD is not provided.'
     depends_on:
     - sdk_gen
     parallel_group: null
@@ -743,6 +895,7 @@ workflow:
     - axmodel_path
     - model_meta_json
     - TASK_DIR
+    - model_route
     outputs:
     - runonboard_report
     - python_latency_ms
@@ -764,7 +917,9 @@ workflow:
     kind: agent
     skill: .codex/skills/magnetar/hidden/package/SKILL.md
     description: 'Assemble final customer package with complete reproducibility: requirements.txt, compile script, detailed
-      READMEs for all subdirectories'
+      READMEs for all subdirectories. route=llm → models/ 为 axllm 模型目录（config.json +
+      tokenizer + *.axmodel），model_convert 提供可复现 llm_build2 命令与 embed_process，
+      setup.sh/run.sh 适配 axllm 安装与 serve'
     depends_on:
     - stage_review_runonboard
     parallel_group: null
@@ -777,6 +932,7 @@ workflow:
     - compile_report
     - simulate_report
     - runonboard_report
+    - model_route
     outputs:
     - package_dir
     - customer_readme
@@ -830,6 +986,17 @@ workflow:
     - SOURCE or TARGET_HARDWARE is missing
     on_pass: proceed to acquire
     on_fail: ask user for missing input
+  - id: model_route
+    kind: requirement
+    depends_on:
+    - dry_run_check
+    pass_when:
+    - classify() 返回 route=llm 或 route=general；hybrid 组合模型已与用户确认
+      LLM/AR 子模型拆分方案
+    fail_when:
+    - 模型既像 LLM 又含其他子模型且拆分方案无法确认
+    on_pass: proceed to export（按 model_route 分支执行）
+    on_fail: ask user 确认拆分方案或改走通用路径
   - id: pulsar2_available
     kind: capability
     depends_on:
@@ -837,8 +1004,10 @@ workflow:
     pass_when:
     - PULSAR2_BIN works or PULSAR2_IMAGE works or pulsar2 is on PATH or HuggingFace AXERA-TECH/Pulsar2 image is available
       through hf-mirror
+    - 'route=llm 时额外要求 pulsar2 llm_build2 可用（Pulsar2 >= 6.0）'
     fail_when:
     - no local, user-provided, or HuggingFace Pulsar2 runtime is available through hf-mirror
+    - 'route=llm 但当前 Pulsar2 无 llm_build2 子命令'
     on_pass: proceed to compile
     on_fail: block and request Pulsar2 source
   - id: export_valid
@@ -858,11 +1027,25 @@ workflow:
     depends_on:
     - simulate
     pass_when:
-    - cosine >= 0.99 or task-specific metrics are accepted
+    - 'general: cosine >= 0.99 or task-specific metrics are accepted'
+    - 'llm: llm_build2 逐层 cosine min >= 0.99，且（有板时）axllm serve 语义验证全非空'
     fail_when:
     - accuracy below threshold
     on_pass: proceed to SDK generation
-    on_fail: STOP and ask whether to adjust compile/export settings
+    on_fail: '回退 COMPILE 调整量化/权重类型参数；仍失败 STOP 提议 QAT 或回退通用路径'
+  - id: llm_route_acceptance
+    kind: validation
+    depends_on:
+    - accuracy_gate
+    pass_when:
+    - 'route=llm 时 compile/llm_model_dir 完整且 export/model_meta.json 的
+      compile_cosine.min >= 0.99'
+    - '有板时 axllm serve OpenAI 兼容接口 ≥3 组 prompt 验证通过'
+    fail_when:
+    - LLM 模型目录缺 config.json/tokenizer/逐层 axmodel/post axmodel
+    - 逐层 cosine < 0.99
+    on_pass: proceed to SDK generation
+    on_fail: rollback to compile 调整 llm_build2 参数
   - id: package_validation
     kind: validation
     depends_on:
@@ -913,6 +1096,11 @@ workflow:
     - compile failure → rollback to export (change ONNX export strategy)
     - simulate tool failure → rollback to compile (adjust quantization config)
     - accuracy_gate failure → rollback to compile (apply issues/ fix or user-adjusted tuning)
+    - 'llm 路由 llm_build2 失败（架构/head_dim/算子不支持）→ rollback to export
+      （调 weight_type/context 参数或 hybrid 拆分），仍失败 STOP 由用户决定是否回退
+      通用 ONNX 路径'
+    - 'llm 路由逐层 cosine < 0.99 → rollback to compile 重试（s8→s4 / bf16→fp16 /
+      context 参数调整），仍失败 STOP 提议 QAT'
     - package directory rewrite after failed package validation
     - self_test failure → fix scripts/README, re-assemble, retry self_test
     - publish failure → fix credentials/repo, retry publish (max 2)
@@ -920,6 +1108,8 @@ workflow:
     - missing SOURCE or TARGET_HARDWARE (checked at requirements gate)
     - private model credentials
     - ambiguous model file or export entry
+    - 'hybrid 组合模型（AR-TTS 等）的 LLM/AR 子模型拆分方案'
+    - 'llm 路由 llm_build2 不支持该架构时：回退通用 ONNX 路径或改用其他方案'
     - unavailable Pulsar2
     - random-only calibration data
     - accuracy below threshold after issues/ search yields no match
@@ -945,6 +1135,8 @@ workflow:
     # 引用 requirement.acceptance（checks + required_artifacts）作为唯一验收权威
     - all requirement.acceptance.checks pass
     - all requirement.acceptance.required_artifacts exist
+    - 'model_route=llm 时 llm_route_acceptance 通过（模型目录完整 + 逐层 cosine >= 0.99
+      + 有板时 axllm serve 语义验证通过）'
     - RUNONBOARD has been attempted (executed when BOARD provided, skipped when absent) and report exists
     - publish URL is recorded in task.md
     - publish target (github/huggingface) is documented

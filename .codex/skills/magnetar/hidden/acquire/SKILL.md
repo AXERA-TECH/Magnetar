@@ -17,10 +17,25 @@ description: Hidden stage for magnetar. Acquire a remote or local model into TAS
 SDK-GEN 阶段必须读取此文件生成 SDK，确保与 ACQUIRE 验证过的运行流程一致；
 缺失或示例样本不存在时 SDK 生成会报错。
 
+## LLM/自回归检测（model_route gate 的输入）
+
+拿到模型后用 `magnetar.stages.llm.classify(origin, source, model_name)` 判定并把结果
+写入 `cache/acquire/manifest.json` 的 `route_hint`：
+- `{"llm": true|false, "reason": "...", "hybrid": true|false}`
+
+检测信号（命中任一即 route=llm）：
+- `config.json` 的 `architectures`/`model_type`（含嵌套 `text_config`）为 causal LM，
+  如 `Qwen2ForCausalLM`、`LlamaForCausalLM`、`MiniCPMForCausalLM`
+- README.md 的 `pipeline_tag: text-generation`
+- `model_flow.json` 的 task 为 text_generation / causal_lm / chat
+- SOURCE/MODEL_NAME 含已知 LLM 名称；MOSS、NeuTTS、VALL-E、Audio8 等为 hybrid
+  （整体 TTS 但含 LLM/AR 骨干，需拆分，`hybrid: true`）
+
 ## 验证
 - `origin/` 下有模型文件或 `source.txt`
 - `ACQUIRE_REPORT.md` 已生成
 - `model_flow.json` 已记录运行流程（缺失时 SDK-GEN 只能生成直通预处理/后处理，需 Agent 注意）
+- `route_hint` 已写入 manifest.json（供 model_route gate 复用）
 
 ## STOP
 - SOURCE 无效（本地路径不存在、URL 不可达、Git clone 失败）

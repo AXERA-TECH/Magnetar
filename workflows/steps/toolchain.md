@@ -7,4 +7,7 @@
 - timeout: 1200s；retry: 1 次（download_failed / docker_pull_failed）
 - on_failure: ask_user（Pulsar2 / BSP 不可获取）
 - 要点：验证 Pulsar2 可用 + 准备芯片 C++ BSP/交叉编译器；Pulsar2 镜像走 hf-mirror
+- LLM 分支：额外确认 `pulsar2 llm_build2 -h` 可用（Pulsar2 ≥ 6.0，不可用则
+  blocked/提示升级镜像）；准备 ax-llm-build 工具（`ensure_axllm_build_tools`，
+  自动克隆 `https://github.com/AXERA-TECH/ax-llm-build.git` 到 cache/）
 - 后置：`pulsar2_available` gate → COMPILE

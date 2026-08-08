@@ -27,15 +27,26 @@ Agent 负责编排和决策。`magnetar/stages/*.py` 提供确定性执行函数
 | `magnetar.stages.runonboard` | `run(task_dir, sample, hw, pwd)` → `metrics` | 板端部署验证 |
 | `magnetar.stages.package` | `assemble(task_dir, metrics, image)` → `pkg`, `self_test(pkg)` → `result` | 组装面向小白的交付包，含一键脚本 + README + 自测 |
 | `magnetar.stages.publish` | `publish(pkg, target, name, token, org, model)` → `result` | 发布到 GitHub（源码）或 HuggingFace（预编译） |
+| `magnetar.stages.llm` | `classify(origin, ...)` → 路由；`llm_build(task_dir, input, chip, image, ...)` → `model_dir`；`install_axllm(board)` / `serve_axllm(board, model_dir)` / `validate_chat(api_url, ...)` | LLM/自回归模型路由与 ax-llm 部署（llm_build2 编译 + axllm 板端 serve/验证） |
 
 非 MobileNet 模型：优先使用 `magnetar.stages.export.run_generic` /
 `scripts/export_onnx.py` 通用导出器（load 脚本约定 `build()` 返回 `(model, example_inputs)`），
 导出失败时依据 `export/export_report.md` 的诊断报告决定人工处理方向；确需手写导出逻辑时
 再自行实现并正确填写 `model_meta.json`。
 
+LLM/自回归模型（route=llm）：不走通用 ONNX 路径，改用 ax-llm——
+`pulsar2 llm_build2`（Pulsar2 ≥ 6.0）直接编译 HF 权重 → `compile/llm_model_dir/`
+（逐层 axmodel + post axmodel + bf16 embedding + tokenizer + axllm config.json），
+板端用 `axllm run/serve`（AXERA-TECH/ax-llm，axllm 分支）；SDK 为 OpenAI 兼容
+HTTP 客户端（Python 依赖仅 requests）。判定函数：`magnetar.stages.llm.classify`
+（config architectures/model_type、pipeline_tag、model_flow task、模型名）。
+hybrid 组合模型（MOSS-TTS、NeuTTS-2E 等）需先确认 LLM/AR 子模型拆分方案。
+
 ## 执行流程
 
 严格按以下顺序推进 10 阶段，不可跳过。每阶段完成后更新 `task.md` 和 `analysis.md`。
+INIT 后先过 `model_route` gate：route=llm 时 EXPORT/COMPILE/SIMULATE/SDK-GEN/
+RUNONBOARD/PACKAGE 按 ax-llm 分支执行（详见 `.codex/skills/magnetar/SKILL.md` 路由节）。
 
 状态机（回退/重试/循环）由 `workflows/magnetar.yaml` 控制。日常执行按
 `workflows/magnetar-summary.md`（全局读一次）+ `workflows/steps/<阶段>.md`（每阶段读对应片段），
@@ -109,6 +120,22 @@ STOP 前先向用户提议上 QAT（量化感知训练）：
 
 ### 编译
 ONNX 必须静态 shape。编译前用 ONNX Runtime 验证。
+
+### LLM / 自回归模型（ax-llm）
+- 入口：`pulsar2 llm_build2`（Pulsar2 ≥ 6.0，支持 AX650A/N、AX630C，其他芯片以
+  `--chip` 支持与 ax-llm 实际验证为准）；产物逐层 axmodel + post axmodel +
+  bf16 embedding，自带逐层 decode/prefill cosine 校验。
+- 板端运行：AXERA-TECH/ax-llm `axllm` 分支（`axllm run <model_dir>` /
+  `axllm serve <model_dir> --port 8000`，OpenAI 兼容 API）；安装
+  `curl -fsSL https://raw.githubusercontent.com/AXERA-TECH/ax-llm/axllm/install.sh | bash`。
+- 辅助工具：AXERA-TECH/ax-llm-build（embed_process.sh 提取/转换 embedding；
+  config/*.json 为 llm_build 配置样例）。
+- axllm 模型目录 config.json 必填字段：model_name、tokenizer_type、
+  url_tokenizer_model（本地 tokenizer 文件）、template_filename_axmodel（含 %d）、
+  axmodel_num、filename_post_axmodel、filename_tokens_embed、
+  tokens_embed_num、tokens_embed_size。
+- 精度验收：逐层 cosine min ≥ 0.99 + 板端语义验证（≥3 组 prompt 全非空）；
+  不达标先调 weight_type（s8→s4）/hidden_state_type/context，仍失败 STOP 提议 QAT。
 
 ### 输入/输出格式（成功案例固化）
 - 校准数据、pulsar2 run、ax_run_model、axengine 输入格式一律按 `docs/input-format-cheatsheet.md`，禁止反复试格式

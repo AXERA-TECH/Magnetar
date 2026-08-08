@@ -23,6 +23,9 @@
 ## 常见匹配建议
 
 - TTS 类模型 COMPILE 失败 → 先看 001/008/009/010/011/012
+- 自回归/类 LLM 模型（Qwen/Llama/MiniCPM/GPT、含 LLM 骨干的 TTS）→ 先走 ax-llm
+  路由（`magnetar.stages.llm.classify` → `pulsar2 llm_build2` → axllm），
+  COMPILE 失败参考 012（llm_build head_dim 断言）与 013（MOSS-TTS 全流程）
 - 检测类模型（YOLO）→ 006 + yolo_quantization_and_compile
 - EXPORT 阶段 LayerNorm/opset 失败 → diarizen_pipeline_issues
 - 校准数据 / pulsar2 run / ax_run_model 输入格式问题 → 先看 `docs/input-format-cheatsheet.md`（成功案例固化），再看 piper/013/yolo 量化记录

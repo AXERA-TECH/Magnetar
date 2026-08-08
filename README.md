@@ -34,6 +34,11 @@ cp .magnetarrc.example .magnetarrc
 
 没有 AX 板子？不传 `BOARD`，板端验证自动跳过，交付包仍然完整。
 
+**LLM / 自回归模型**（Qwen、Llama、MiniCPM、GPT、含 LLM 骨干的 TTS 等）：
+工作流会自动改走 **ax-llm** 路径——`pulsar2 llm_build2` 直接编译 HuggingFace 权重为
+逐层 AXMODEL，板端用 `axllm serve` 提供 OpenAI 兼容 API，交付 Python SDK 仅依赖
+`requests`。无需手动指定，INIT 后的 `model_route` gate 自动判定。
+
 ### 交付包产出
 
 ```
