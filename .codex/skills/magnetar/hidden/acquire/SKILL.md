@@ -8,6 +8,17 @@ description: Hidden stage for magnetar. Acquire a remote or local model into TAS
 ## 执行
 `magnetar.stages.acquire.run(task_dir, source)`
 
+下载镜像默认：ModelScope 优先（国内 CDN）；HuggingFace 走 `HF_ENDPOINT`（默认 hf-mirror）；
+Git URL 克隆经 `GH_PROXY`（默认 gh-proxy）；uv/pip 用 `PIP_INDEX_URL`（默认阿里云）。
+全部可在 `.magnetarrc` / 环境变量覆盖，置空字符串禁用。
+SOURCE 为 HF repo 时，先 `magnetar.net_util.modelscope_available("<org>/<name>")`
+探测 ModelScope 是否有同名仓库，有则 `modelscope download --model <org>/<name>` 获取，
+没有才回退 HuggingFace（hf-mirror）。
+HF 大文件（权重/大附件）回退时用 hf-mirror 的 hfd 工具多线程下载：
+`scripts/download_hf.sh <org>/<name> --local-dir origin/<name> -x 8`
+（自动缓存 `~/.cache/magnetar/hfd.sh`，`HF_ENDPOINT` 默认 hf-mirror；小文件
+如 tokenizer.json 可直接 `curl/wget $HF_ENDPOINT/...` 单线获取）。
+
 拿到模型后，**记录运行流程**：调用 `magnetar.stages.acquire.write_model_flow(task_dir, flow)`
 写入 `origin/model_flow.json`，字段见函数 docstring。至少包含：
 - `example_input`：真实样本路径（保证 SDK 用与验证一致的数据）

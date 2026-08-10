@@ -58,6 +58,23 @@ class TaskConfigTest(unittest.TestCase):
         cfg = load_task_config(self.task, project_root=self.root)
         self.assertEqual(cfg["SOURCE"], "global")
 
+    def test_mirror_defaults_when_unset(self):
+        (self.root / ".magnetarrc").write_text("SOURCE=global\n", encoding="utf-8")
+        cfg = load_task_config(self.task, project_root=self.root)
+        self.assertEqual(cfg["HF_ENDPOINT"], "https://hf-mirror.com")
+        self.assertEqual(cfg["GH_PROXY"], "https://gh-proxy.com")
+        self.assertEqual(cfg["PIP_INDEX_URL"], "https://mirrors.aliyun.com/pypi/simple/")
+
+    def test_mirror_disabled_with_empty_value(self):
+        (self.root / ".magnetarrc").write_text(
+            "SOURCE=global\nHF_ENDPOINT=\nGH_PROXY=\nPIP_INDEX_URL=\n",
+            encoding="utf-8",
+        )
+        cfg = load_task_config(self.task, project_root=self.root)
+        self.assertEqual(cfg["HF_ENDPOINT"], "")
+        self.assertEqual(cfg["GH_PROXY"], "")
+        self.assertEqual(cfg["PIP_INDEX_URL"], "")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -71,6 +71,32 @@ AUTO_APPROVE=false                 # true = 全自动，不暂停
 
 完整说明见 `.magnetarrc.example`。
 
+## 国内镜像（默认）
+
+工作流默认使用国内镜像，可在 `.magnetarrc` 中覆盖（置空字符串即恢复直连）：
+
+```bash
+HF_ENDPOINT=https://hf-mirror.com                          # HuggingFace 镜像
+GH_PROXY=https://gh-proxy.com                              # GitHub 克隆/raw 下载代理
+PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/      # uv / pip 阿里云 PyPI 源
+```
+
+涉及范围：模型权重下载、ax-llm / ax-llm-build / pyaxengine 等 GitHub 仓库克隆与安装、
+ax-remote-infer release 下载、uv/pip 包安装、Pulsar2 镜像获取（ModelScope 优先，hf-mirror 回退）。
+
+**ModelScope 优先**：凡是 HuggingFace 上托管的内容（模型权重、Pulsar2、
+AX650-Community-Hub 等），工作流先探测 ModelScope（`modelscope.cn/models/<org>/<name>`）
+是否存在，存在则从 ModelScope 下载（国内 CDN 更快），没有才回退 HF/hf-mirror。
+
+HF 大文件（权重等）回退下载用 hf-mirror 的 hfd 工具：
+
+```bash
+scripts/download_hf.sh Qwen/Qwen2.5-7B-Instruct --local-dir origin/qwen -x 8
+```
+
+脚本会自动缓存 `https://hf-mirror.com/hfd/hfd.sh` 到 `~/.cache/magnetar/`，
+用 aria2c 多线程下载（无 aria2c 自动回退 wget），端点默认 hf-mirror。
+
 ## 工作流
 
 | 阶段 | 说明 | 关键产物 |

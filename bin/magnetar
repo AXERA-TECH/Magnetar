@@ -78,7 +78,7 @@ cmd_check() {
     echo -e "${CYAN}=== 环境依赖 ===${NC}"
     check_dep git || all_ok=1
     check_dep python3 "apt install python3" || all_ok=1
-    check_dep uv "curl -LsSf https://astral.sh/uv/install.sh | sh" || all_ok=1
+    check_dep uv "python3 -m pip install -i https://mirrors.aliyun.com/pypi/simple/ uv" || all_ok=1
     if command -v docker &>/dev/null && docker info &>/dev/null 2>&1; then
         echo -e "  ${GREEN}✓${NC} docker ($(docker --version | cut -d' ' -f3 | tr -d ','))"
     else

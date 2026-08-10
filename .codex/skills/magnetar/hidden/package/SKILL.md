@@ -47,11 +47,15 @@ package/
   `embed_process.sh` + axllm config 生成说明）+ README 覆盖
   权重获取 → llm_build2 → embedding/tokenizer 处理 → 板端 axllm serve；
 - `setup.sh`：安装 axllm（`curl -fsSL
-  https://raw.githubusercontent.com/AXERA-TECH/ax-llm/axllm/install.sh | bash`）
+  https://gh-proxy.com/https://raw.githubusercontent.com/AXERA-TECH/ax-llm/axllm/install.sh | bash`，
+  `GH_PROXY` 可覆盖）
   或检查已装；`run.sh`：`axllm serve models/ --port 8000 &` 后运行
   `python/demo.py`（OpenAI 兼容客户端）并打印回复；
 - `python/requirements.txt` 依赖仅 `requests`；`reports/performance_report.md`
   记录 TTFT / token 速率 / 逐层 cosine（替代张量对分指标）。
+
+一键脚本默认走国内镜像：`setup.sh` 中 pip 安装使用
+`PIP_INDEX_URL`（默认 `https://mirrors.aliyun.com/pypi/simple/`）。
 
 ## README 编写规范
 

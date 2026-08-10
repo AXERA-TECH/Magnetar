@@ -90,8 +90,20 @@ PULSAR2_BIN=
 # HuggingFace 命名空间（可选，默认推送到个人账户）
 # HF_ORG=
 
-# HuggingFace 镜像端点（国内默认 hf-mirror，海外用户可设为空字符串）
+# ===== 国内镜像（默认值，海外用户可置空字符串恢复直连）=====
+
+# 涉及 HuggingFace 的内容（权重 / Pulsar2 / BSP SDK 等）先查 ModelScope：
+#   magnetar.net_util.modelscope_available("<org>/<name>")，有则优先 ModelScope，无才回退 HF
+# HF 大文件下载默认用 hf-mirror 的 hfd（scripts/download_hf.sh），小文件单线即可
+
+# HuggingFace 镜像端点（国内默认 hf-mirror）
 # HF_ENDPOINT=https://hf-mirror.com
+
+# GitHub 访问代理：git clone / raw 下载默认经此代理
+# GH_PROXY=https://gh-proxy.com
+
+# PyPI / uv 包镜像（默认阿里云，可改为清华 https://pypi.tuna.tsinghua.edu.cn/simple 等）
+# PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
 
 # ===== 行为选项 =====
 

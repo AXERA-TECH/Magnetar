@@ -24,6 +24,8 @@ import subprocess
 import time
 from pathlib import Path
 
+from magnetar.net_util import gh_proxy_url
+
 AX_LLM_REPO = "https://github.com/AXERA-TECH/ax-llm.git"
 AX_LLM_BRANCH = "axllm"
 AX_LLM_BUILD_REPO = "https://github.com/AXERA-TECH/ax-llm-build.git"
@@ -248,7 +250,8 @@ def ensure_axllm_build_tools(task_dir: Path) -> Path:
     tools = cache / "ax-llm-build"
     if not (tools / "tools" / "embed_process.sh").is_file():
         subprocess.run(
-            ["git", "clone", "--depth=1", AX_LLM_BUILD_REPO, str(tools)],
+            ["git", "clone", "--depth=1",
+             gh_proxy_url(AX_LLM_BUILD_REPO), str(tools)],
             check=True, timeout=600,
         )
     for name in ("fp32_to_bf16", "embed_process.sh", "extract_embed.py",
@@ -492,7 +495,9 @@ def install_axllm(board: dict, timeout: int = 1800) -> str:
     repo = os.environ.get("AX_LLM_REPO", AX_LLM_REPO)
     branch = os.environ.get("AX_LLM_BRANCH", AX_LLM_BRANCH)
     install_url = os.environ.get("AXLLM_INSTALL_URL") or (
-        f"https://raw.githubusercontent.com/{repo.split('github.com/')[-1]}/{branch}/install.sh"
+        gh_proxy_url(
+            f"https://raw.githubusercontent.com/{repo.split('github.com/')[-1]}/{branch}/install.sh"
+        )
         if "github.com" in repo else AXLLM_INSTALL_URL
     )
     try:

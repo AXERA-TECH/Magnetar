@@ -20,8 +20,14 @@ workflow:
         axmodel）+ AXERA-TECH/ax-llm（axllm 分支）板端运行/服务；通用模型仍走
         ONNX -> pulsar2 build 路径'
       - Pulsar2 Docker image fallback from https://hf-mirror.com/AXERA-TECH/Pulsar2/tree/main
-      - HuggingFace downloads must use hf-mirror with HF_ENDPOINT=https://hf-mirror.com
-      - Python virtual environments must be managed with uv
+      - HF-hosted artifacts (model weights / Pulsar2 / BSP SDK) must first check ModelScope
+        (modelscope_available) and fall back to hf-mirror only when absent
+      - 'HF large-file downloads use hf-mirror hfd: scripts/download_hf.sh
+        <org>/<name> --local-dir origin/<name> -x 8'
+      - HuggingFace downloads default to hf-mirror with HF_ENDPOINT=https://hf-mirror.com
+      - GitHub git clone / raw downloads default through GH_PROXY=https://gh-proxy.com
+      - Python virtual environments must be managed with uv, defaulting to Aliyun PyPI mirror
+        (PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/)
       - ONNX static shape
       - onnxruntime for ONNX validation
       - Python SDK with pyaxengine and AxEngineExecutionProvider by default
@@ -200,7 +206,19 @@ workflow:
     required: false
     source: environment
     validation:
-    - must be https://hf-mirror.com for HuggingFace downloads
+    - defaults to https://hf-mirror.com for HuggingFace downloads (空字符串禁用，海外直连)
+  - id: GH_PROXY
+    type: url
+    required: false
+    source: environment
+    validation:
+    - defaults to https://gh-proxy.com; proxies github.com / raw.githubusercontent.com (空字符串禁用)
+  - id: PIP_INDEX_URL
+    type: url
+    required: false
+    source: environment
+    validation:
+    - defaults to https://mirrors.aliyun.com/pypi/simple/ for uv / pip installs
   - id: uv
     type: executable
     required: false
@@ -230,7 +248,7 @@ workflow:
     required: false
     source: environment
     validation:
-    - defaults to https://github.com/AXERA-TECH/ax-llm.git
+    - defaults to https://github.com/AXERA-TECH/ax-llm.git (实际访问经 GH_PROXY 代理)
     description: ax-llm 仓库地址（LLM 路由板端运行/服务）
   - id: AX_LLM_BRANCH
     type: text
@@ -244,7 +262,7 @@ workflow:
     required: false
     source: environment
     validation:
-    - defaults to https://github.com/AXERA-TECH/ax-llm-build.git
+    - defaults to https://github.com/AXERA-TECH/ax-llm-build.git (实际访问经 GH_PROXY 代理)
     description: ax-llm-build 仓库（embedding 处理工具，LLM 路由编译辅助）
   - id: LLM_MAX_CONTEXT
     type: int
@@ -493,6 +511,8 @@ workflow:
     - HF_TOKEN
     - TASK_DIR
     - HF_ENDPOINT
+    - GH_PROXY
+    - PIP_INDEX_URL
     outputs:
     - origin_path
     - acquire_manifest
@@ -594,6 +614,7 @@ workflow:
     - acquire_manifest
     - TASK_DIR
     - HF_ENDPOINT
+    - PIP_INDEX_URL
     - uv
     - model_route
     outputs:
@@ -630,6 +651,7 @@ workflow:
     - TARGET_HARDWARE
     - CXX_BSP_URL
     - HF_ENDPOINT
+    - GH_PROXY
     - model_route
     outputs:
     - pulsar2_command
@@ -780,6 +802,7 @@ workflow:
     - MODEL_NAME
     - cxx_toolchain_file
     - ax_runtime_root
+    - GH_PROXY
     - model_route
     outputs:
     - python_sdk_path
@@ -895,6 +918,7 @@ workflow:
     - axmodel_path
     - model_meta_json
     - TASK_DIR
+    - GH_PROXY
     - model_route
     outputs:
     - runonboard_report

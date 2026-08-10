@@ -2,7 +2,7 @@
 
 - kind: agent；skill: `.codex/skills/magnetar/hidden/export/SKILL.md`
 - depends_on: `model_route`
-- inputs: origin_path / acquire_manifest / TASK_DIR / HF_ENDPOINT / uv / model_route
+- inputs: origin_path / acquire_manifest / TASK_DIR / HF_ENDPOINT / PIP_INDEX_URL / uv / model_route
 - outputs: onnx_path（general）/ model_meta_json / calibration_dir / export_report
 - timeout: 3600s；retry: 1 次（export_failed / validation_mismatch / compile_rollback）
 - on_failure: ask_user（多次失败需用户介入）

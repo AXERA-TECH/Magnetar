@@ -2,7 +2,7 @@
 
 - kind: agent；skill: `.codex/skills/magnetar/hidden/runonboard/SKILL.md`
 - depends_on: `sdk_gen`
-- inputs: TASK_DIR / BOARD / BOARD_PASSWORD / TARGET_HARDWARE / model_route
+- inputs: TASK_DIR / BOARD / BOARD_PASSWORD / TARGET_HARDWARE / GH_PROXY / model_route
 - outputs: runonboard_report / llm_metrics（TTFT / token 速率 / 内存）
 - skip_condition: BOARD 未提供（缺失不是 STOP）
 - 要点：选板后先 `ensure_remote_infer(board)`（18500 未装自动静默安装）；

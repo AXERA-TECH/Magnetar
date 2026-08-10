@@ -5,10 +5,17 @@
 
 ## 常用资源
 
+- 先查 ModelScope（国内 CDN 快）：涉及 HF 的内容先看
+  https://modelscope.cn/models/AXERA-TECH 有没有，无才回退 hf-mirror
+- HF 大文件下载（hfd，hf-mirror 多线程工具）:
+  `wget https://hf-mirror.com/hfd/hfd.sh`，封装脚本 `scripts/download_hf.sh`
+  （缓存 `~/.cache/magnetar/hfd.sh`，`HF_ENDPOINT` 默认 hf-mirror，aria2c 优先）
+- Pulsar2 镜像 (ModelScope): https://modelscope.cn/models/AXERA-TECH/Pulsar2
 - Pulsar2 镜像: https://hf-mirror.com/AXERA-TECH/Pulsar2
 - Pulsar2 文档: https://pulsar2-docs.readthedocs.io/zh-cn/latest/
 - 爱芯 HF: https://hf-mirror.com/AXERA-TECH
 - 爱芯 GitHub: https://github.com/AXERA-TECH
+- AX650 BSP SDK (ModelScope): https://modelscope.cn/models/AXERA-TECH/AX650-Community-Hub
 - AX650 BSP SDK: https://hf-mirror.com/AXERA-TECH/AX650-Community-Hub
 - 交叉编译器: https://github.com/AXERA-TECH/ax-samples/tree/main/docs
 - 获取BSP: https://github.com/AXERA-TECH/ax-pipeline/blob/main/scripts/build_common.sh

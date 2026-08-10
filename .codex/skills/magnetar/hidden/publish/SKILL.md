@@ -64,4 +64,4 @@ result = magnetar.stages.publish.publish(
 
 - 凭据缺失 → 返回错误信息，重新询问用户
 - 推送/上传失败 → 返回错误详情，用户决定重试或跳过
-- huggingface_hub 未安装 → 提示 `pip install huggingface_hub`
+- huggingface_hub 未安装 → 提示 `pip install -i https://mirrors.aliyun.com/pypi/simple/ huggingface_hub`

@@ -8,9 +8,43 @@ log_error() { echo -e "${RED}[ERROR]${NC} $*"; }
 
 PULSAR2_VERSION="${PULSAR2_VERSION:-6.0}"
 PULSAR2_FILE="ax_pulsar2_${PULSAR2_VERSION}.tar.gz"
-PULSAR2_URL="https://hf-mirror.com/AXERA-TECH/Pulsar2/resolve/main/${PULSAR2_VERSION}/${PULSAR2_FILE}"
+PULSAR2_URL="${PULSAR2_URL:-}"
+PULSAR2_MODELSCOPE_URL="https://modelscope.cn/models/AXERA-TECH/Pulsar2/resolve/master/${PULSAR2_VERSION}/${PULSAR2_FILE}"
+PULSAR2_HF_URL="https://hf-mirror.com/AXERA-TECH/Pulsar2/resolve/main/${PULSAR2_VERSION}/${PULSAR2_FILE}"
 PULSAR2_IMAGE_TAG="pulsar2:${PULSAR2_VERSION}"
 CACHE_DIR="${HOME}/.cache/magnetar"
+
+# 下载顺序：显式 PULSAR2_URL > ModelScope（国内快） > hf-mirror（回退）
+download_pulsar2() {
+    local url tmp urls=()
+    for url in "$@"; do
+        [ -n "${url}" ] && urls+=("${url}")
+    done
+    for url in "${urls[@]}"; do
+        log_info "Trying ${url}"
+        tmp="${CACHE_DIR}/${PULSAR2_FILE}.part"
+        rm -f "${tmp}"
+        if command -v aria2c &>/dev/null; then
+            if aria2c -x4 -s4 -d "${CACHE_DIR}" -o "${PULSAR2_FILE}.part" "${url}"; then
+                mv "${tmp}" "${CACHE_DIR}/${PULSAR2_FILE}"; return 0
+            fi
+        elif command -v wget &>/dev/null; then
+            if wget -c --show-progress -O "${tmp}" "${url}"; then
+                mv "${tmp}" "${CACHE_DIR}/${PULSAR2_FILE}"; return 0
+            fi
+        elif command -v curl &>/dev/null; then
+            if curl -L --retry 2 --connect-timeout 15 --progress-bar -o "${tmp}" "${url}"; then
+                mv "${tmp}" "${CACHE_DIR}/${PULSAR2_FILE}"; return 0
+            fi
+        else
+            log_error "Need wget, curl, or aria2c to download."
+            return 1
+        fi
+        rm -f "${tmp}"
+    done
+    log_error "All download URLs failed."
+    return 1
+}
 
 echo ""
 echo "============================================"
@@ -60,17 +94,7 @@ else
     if [ -f "${CACHE_DIR}/${PULSAR2_FILE}" ]; then
         log_info "Found cached: ${CACHE_DIR}/${PULSAR2_FILE}"
     else
-        log_info "Downloading ${PULSAR2_URL} ..."
-        if command -v aria2c &>/dev/null; then
-            aria2c -x4 -s4 -d "${CACHE_DIR}" "${PULSAR2_URL}"
-        elif command -v wget &>/dev/null; then
-            wget -c --show-progress -O "${CACHE_DIR}/${PULSAR2_FILE}" "${PULSAR2_URL}"
-        elif command -v curl &>/dev/null; then
-            curl -L --progress-bar -o "${CACHE_DIR}/${PULSAR2_FILE}" "${PULSAR2_URL}"
-        else
-            log_error "Need wget, curl, or aria2c to download."
-            exit 1
-        fi
+        download_pulsar2 "${PULSAR2_URL}" "${PULSAR2_MODELSCOPE_URL}" "${PULSAR2_HF_URL}"
         log_info "Downloaded: ${CACHE_DIR}/${PULSAR2_FILE}"
     fi
 

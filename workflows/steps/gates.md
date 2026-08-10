@@ -5,7 +5,8 @@
 - `required_inputs`：SOURCE / TARGET_HARDWARE 缺失 → 问用户
 - `model_route`：`magnetar.stages.llm.classify` 判定 route=llm / general；
   hybrid 组合模型需用户确认 LLM/AR 子模型拆分方案
-- `pulsar2_available`：本地 PULSAR2_BIN / PULSAR2_IMAGE / PATH / hf-mirror 镜像任一可用 → COMPILE；
+- `pulsar2_available`：本地 PULSAR2_BIN / PULSAR2_IMAGE / PATH / ModelScope /
+  hf-mirror 镜像任一可用 → COMPILE；
   全不可用 → blocked；LLM 路由额外要求 `pulsar2 llm_build2` 可用（Pulsar2 ≥ 6.0）
 - `export_valid`：general 静态 shape + ORT 加载 + 对分通过 → TOOLCHAIN；
   llm 权重可推理 + llm_build.sh 生成；失败 → 换策略重试或问用户

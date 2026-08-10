@@ -2,7 +2,7 @@
 
 - kind: agent；skill: `.codex/skills/magnetar/hidden/sdk-gen/SKILL.md`
 - depends_on: `llm_route_acceptance`
-- inputs: axmodel_path / axmodel_dir / model_meta_json / MODEL_NAME / cxx_toolchain_file / ax_runtime_root / model_route
+- inputs: axmodel_path / axmodel_dir / model_meta_json / MODEL_NAME / cxx_toolchain_file / ax_runtime_root / GH_PROXY / model_route
 - outputs: python_sdk_path / cpp_sdk_path / sdk_report
 - timeout: 1800s；retry: 1 次（generation_error / validation_failed）
 - on_failure: fail

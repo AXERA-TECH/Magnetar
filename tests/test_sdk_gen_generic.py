@@ -78,6 +78,8 @@ class SdkGenGenericTest(unittest.TestCase):
             for name in ("__init__.py", "inference.py", "preprocess.py", "postprocess.py",
                          "example.py", "requirements.txt", "README.md"):
                 self.assertTrue((ps / name).is_file(), name)
+            req = (ps / "requirements.txt").read_text(encoding="utf-8")
+            self.assertIn("gh-proxy.com", req)  # 国内镜像默认：GitHub 直链经 GH_PROXY
 
             # SDK 默认 AxEngineExecutionProvider 不可用时应回退 onnxruntime CPU
             out_dir = Path(tmp) / "py_out"

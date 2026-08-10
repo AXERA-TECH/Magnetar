@@ -13,8 +13,10 @@ description: Hidden stage for magnetar. Ensure Pulsar2 and the chip-specific C++
 - 额外确认 `pulsar2 llm_build2 -h` 可用（Pulsar2 ≥ 6.0）；不可用 → blocked，
   提示升级镜像（`scripts/install_pulsar2.sh` 默认 6.0）；
 - 准备 ax-llm-build 工具：`magnetar.stages.llm.ensure_axllm_build_tools(task_dir)`
-  （自动克隆 `https://github.com/AXERA-TECH/ax-llm-build.git` 到
+  （默认经 `GH_PROXY` 克隆 `https://github.com/AXERA-TECH/ax-llm-build.git` 到
   `TASK_DIR/cache/ax-llm-build`）；
+- Pulsar2 / AX650 BSP SDK 下载 ModelScope 优先（`AXERA-TECH/Pulsar2`、
+  `AXERA-TECH/AX650-Community-Hub` 均有镜像），无才回退 hf-mirror；
 - 记录板端 axllm 安装方式（官方 `install.sh`，axllm 分支）到 task.md。
 
 ## 验证

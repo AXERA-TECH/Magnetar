@@ -73,7 +73,7 @@ else
     echo -e "  ${RED}✗${NC} python3 — 未找到 安装: apt install python3"
     DEPS_OK=1
 fi
-check_dep uv "curl -LsSf https://astral.sh/uv/install.sh | sh" || DEPS_OK=1
+check_dep uv "python3 -m pip install -i https://mirrors.aliyun.com/pypi/simple/ uv" || DEPS_OK=1
 check_docker || DEPS_OK=1
 check_dep cmake "apt install cmake" || DEPS_OK=1
 check_dep bash || DEPS_OK=1

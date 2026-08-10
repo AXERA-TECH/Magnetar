@@ -6,11 +6,13 @@
 import json, os, subprocess, urllib.parse, urllib.request
 from pathlib import Path
 
+from magnetar.net_util import gh_proxy_url
+
 DASHBOARD = os.environ.get("MAGNETAR_BOARD_DASHBOARD", "http://10.126.35.22:25000/api/devices")
 REMOTE_INFER_PORT = 18500
-AX_REMOTE_INFER_URL = os.environ.get(
-    "AX_REMOTE_INFER_URL",
-    "https://github.com/AXERA-TECH/ax-remote-infer/releases/download/latest/ax-remote-infer-latest.zip",
+AX_REMOTE_INFER_URL = (
+    "https://github.com/AXERA-TECH/ax-remote-infer/releases/download/"
+    "latest/ax-remote-infer-latest.zip"
 )
 
 def _ssh_base(b): return ["sshpass", "-p", b["password"], "ssh", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-o", "ConnectTimeout=10", "-p", str(b["port"]), f"{b['user']}@{b['host']}"]
@@ -92,7 +94,8 @@ def ensure_remote_infer(board: dict, cache_dir: str | Path | None = None) -> dic
     zip_path = cache / "ax-remote-infer-latest.zip"
     if not zip_path.exists() or not _is_valid_zip(zip_path):
         print(f"[board_util] {host}:18500 不通，下载 ax-remote-infer release ...")
-        _download_axinferelease(AX_REMOTE_INFER_URL, zip_path)
+        url = os.environ.get("AX_REMOTE_INFER_URL") or gh_proxy_url(AX_REMOTE_INFER_URL)
+        _download_axinferelease(url, zip_path)
     release_dir = cache / "release"
     installer = release_dir / "remote_install.sh"
     if not installer.exists():

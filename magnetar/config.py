@@ -2,6 +2,14 @@
 import json, os, re
 from pathlib import Path
 
+# 国内镜像默认（环境变量或 .magnetarrc 置空字符串即禁用，海外用户可恢复直连）
+MIRROR_DEFAULTS = {
+    "HF_ENDPOINT": "https://hf-mirror.com",
+    "GH_PROXY": "https://gh-proxy.com",
+    "PIP_INDEX_URL": "https://mirrors.aliyun.com/pypi/simple/",
+}
+
+
 def load_config(project_root: Path | None = None) -> dict:
     if project_root is None:
         for parent in [Path.cwd(), *Path.cwd().parents]:
@@ -22,6 +30,10 @@ def load_config(project_root: Path | None = None) -> dict:
     cfg.setdefault("TARGET_HARDWARE", "AX650")
     cfg.setdefault("SDK_LANG", "both")
     cfg.setdefault("BOARD_PASSWORD", os.environ.get("MAGNETAR_BOARD_PASSWORD", "123456"))
+    for key, default in MIRROR_DEFAULTS.items():
+        if os.environ.get(key):
+            cfg[key] = os.environ[key]
+        cfg.setdefault(key, default)
     return cfg
 
 
@@ -45,4 +57,8 @@ def load_task_config(task_dir: Path | str, project_root: Path | None = None) -> 
     cfg.setdefault("TASK_DIR", str(task_dir))
     cfg.setdefault("TARGET_HARDWARE", "AX650")
     cfg.setdefault("BOARD_PASSWORD", os.environ.get("MAGNETAR_BOARD_PASSWORD", "123456"))
+    for key, default in MIRROR_DEFAULTS.items():
+        if os.environ.get(key):
+            cfg[key] = os.environ[key]
+        cfg.setdefault(key, default)
     return cfg

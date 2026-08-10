@@ -15,7 +15,7 @@ description: Hidden stage for magnetar. Optionally deploy AXMODEL and SDK exampl
 ## LLM 分支（model_route=llm）
 
 1. `magnetar.stages.llm.install_axllm(board)`：板端装 ax-llm（`install.sh`，
-   默认 axllm 分支，AX650 片上编译耗时较长，超时放宽）；
+   默认 axllm 分支，install.sh 下载经 `GH_PROXY` 代理，AX650 片上编译耗时较长，超时放宽）；
 2. `serve_axllm(board, compile/llm_model_dir, port=8000)`：上传模型目录 +
    `axllm serve` 后台启动，轮询 `/health` 就绪；
 3. 板端运行 Python SDK 示例（OpenAI 兼容客户端）：`validate_chat` ≥3 组 prompt

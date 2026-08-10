@@ -75,10 +75,23 @@ PUBLISH 目标/仓库/凭据。
 - PUBLISH 失败 → 修凭据/仓库重试，≤2 次
 - 总尝试上限：3 次；超出转人工
 
+## 国内镜像默认
+
+- ModelScope 优先：涉及 HF 的内容（权重 / Pulsar2 / BSP SDK 等）先
+  `magnetar.net_util.modelscope_available("<org>/<name>")` 查 ModelScope，有则走
+  ModelScope（`modelscope download` / resolve 直链），无才回退 HF/hf-mirror
+- HF 大文件下载用 hf-mirror 的 hfd：`scripts/download_hf.sh <org>/<name>
+  --local-dir origin/<name> -x 8`（自动缓存 hfd.sh，HF_ENDPOINT 默认 hf-mirror，
+  aria2c 多线程加速；小文件单线即可）
+- HuggingFace：默认 `HF_ENDPOINT=https://hf-mirror.com`，海外用户置空字符串直连
+- GitHub：git clone / raw 下载默认经 `GH_PROXY=https://gh-proxy.com`
+- uv / pip：默认 PyPI 阿里云镜像 `PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/`
+- 全部可通过 `.magnetarrc` 或环境变量覆盖（置空即禁用镜像）
+
 ## 常用输入（yaml inputs 段，环境变量可覆盖）
 
 SOURCE、TARGET_HARDWARE、MODEL_NAME、TASK_DIR、HF_TOKEN、HF_ENDPOINT、
-PULSAR2_IMAGE、PULSAR2_BIN、PULSAR2_HF_REPO、BOARD、BOARD_PASSWORD、
+GH_PROXY、PIP_INDEX_URL、PULSAR2_IMAGE、PULSAR2_BIN、PULSAR2_HF_REPO、BOARD、BOARD_PASSWORD、
 AUTO_APPROVE、MODE、AX_LLM_REPO、AX_LLM_BRANCH、AX_LLM_BUILD_REPO、
 LLM_MAX_CONTEXT、LLM_PREFILL_LEN、LLM_PREFILL_STEP_SIZE、LLM_WEIGHT_TYPE、
 LLM_HIDDEN_STATE_TYPE。

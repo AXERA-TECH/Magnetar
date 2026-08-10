@@ -15,6 +15,15 @@ import re
 import textwrap
 from pathlib import Path
 
+from magnetar.net_util import gh_proxy_url
+
+
+def _pyaxengine_requirement() -> str:
+    """pyaxengine 依赖声明：GitHub 直链默认经 GH_PROXY 代理。"""
+    url = gh_proxy_url("https://github.com/AXERA-TECH/pyaxengine.git")
+    return f"pyaxengine @ git+{url}"
+
+
 def run_mobilenet_python(task_dir: Path, imagenet_labels: list[str]) -> None:
     ps = task_dir / "sdk" / "python" / "mobilenet_sdk"; ps.mkdir(parents=True, exist_ok=True)
     (ps / "__init__.py").write_text("from .inference import MobileNetClassifier\n", encoding="utf-8")
@@ -48,7 +57,8 @@ def run_mobilenet_python(task_dir: Path, imagenet_labels: list[str]) -> None:
             return [{"rank": i, "index": int(idx), "label": labels[int(idx)] if labels and int(idx)<len(labels) else str(int(idx)), "score": float(flat[idx])} for i, idx in enumerate(order, 1)]
     """), encoding="utf-8")
     (task_dir / "sdk" / "python" / "imagenet_classes.txt").write_text("\n".join(imagenet_labels)+"\n", encoding="utf-8")
-    (task_dir / "sdk" / "python" / "requirements.txt").write_text("numpy\npyaxengine @ git+https://github.com/AXERA-TECH/pyaxengine.git\n", encoding="utf-8")
+    (task_dir / "sdk" / "python" / "requirements.txt").write_text(
+        f"numpy\n{_pyaxengine_requirement()}\n", encoding="utf-8")
     from magnetar.stages.state import mark_stage
     mark_stage(task_dir, "SDK-GEN", artifacts={"python_sdk": str(task_dir / "sdk" / "python")})
 
@@ -361,7 +371,7 @@ def run_generic_python(task_dir: Path, meta: dict | None = None, flow: dict | No
     (ps / "example.py").write_text(
         _EXAMPLE_TEMPLATE.format(pkg=pkg_full, model_name=name), encoding="utf-8")
     (ps / "requirements.txt").write_text(
-        "numpy\npyaxengine @ git+https://github.com/AXERA-TECH/pyaxengine.git\n", encoding="utf-8")
+        f"numpy\n{_pyaxengine_requirement()}\n", encoding="utf-8")
 
     flow_note = flow.get("preprocess_note", "默认仅 float32 对齐") if flow else "默认仅 float32 对齐"
     post_note = flow.get("postprocess_note", "默认直通") if flow else "默认直通"

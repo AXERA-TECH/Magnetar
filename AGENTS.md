@@ -90,7 +90,18 @@ TASK_DIR/
 ## 模型获取
 
 - 模型下载/获取优先 ModelScope（国内 CDN 快，公开模型无需额外凭据），HuggingFace 仅作回退
-- HuggingFace 下载慢时走镜像：`HF_ENDPOINT=https://hf-mirror.com`；大权重可用 ModelScope CDN 分片并行下载（参考 `issues/013_moss-tts-realtime_ax650_pipeline_pitfalls.md`）
+- 涉及 HF 的任何东西（模型权重、Pulsar2、AX650-Community-Hub、ModelZoo 等）先查
+  ModelScope 有没有：`magnetar.net_util.modelscope_available("<org>/<name>")` 探测
+  （HF repo id 与 ModelScope 约定一致，如 AXERA-TECH/Pulsar2 两侧都有），有则优先
+  ModelScope 下载，没有才回退 HF/hf-mirror
+- HF 大文件（权重等）下载默认用 hf-mirror 的 hfd 工具：
+  `scripts/download_hf.sh <org>/<name> --local-dir origin/<name> -x 8`
+  （自动缓存 `~/.cache/magnetar/hfd.sh`，端点默认 hf-mirror，aria2c 多线程；
+  小文件如 tokenizer.json 仍可直接单线走 HF_ENDPOINT）
+- 默认国内镜像：HuggingFace `HF_ENDPOINT=https://hf-mirror.com`；GitHub 克隆/下载经
+  `GH_PROXY=https://gh-proxy.com`；uv/pip 默认 `PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/`
+  （海外用户可在 `.magnetarrc` 置空字符串禁用，恢复直连）
+- 大权重可用 ModelScope CDN 分片并行下载（参考 `issues/013_moss-tts-realtime_ax650_pipeline_pitfalls.md`）
 - SOURCE 支持 ModelScope / HuggingFace / Git URL / HTTP URL / 本地文件或目录
 
 ## 关键技术点
@@ -144,6 +155,7 @@ ONNX 必须静态 shape。编译前用 ONNX Runtime 验证。
 
 ### 板端 ax-remote-infer
 - 上板（SIMULATE 板端通道 / RUNONBOARD）前检查 TCP 18500：daemon 已跑则直接复用；未装则用官方 release 的 `remote_install.sh` 静默安装（缓存 `~/.cache/magnetar/ax-remote-infer`）
+- release 下载默认经 `GH_PROXY`（`AX_REMOTE_INFER_URL` 可覆盖）
 - 装好后可通过扫描 18500 端口发现板子：`select_board()` 在 dashboard 不可用/无空闲板时回退扫描 `MAGNETAR_SCAN_SUBNET`（默认 dashboard 所在 /24）
 
 ### PUBLISH 发布

@@ -171,13 +171,18 @@ def _write_setup_sh(pkg: Path, has_py: bool, has_cpp: bool):
     """生成一键环境安装脚本。"""
     lines = ["#!/usr/bin/env bash", "set -euo pipefail", ""]
     lines.append('echo "=== 安装依赖 ==="')
+    lines.append(
+        'PIP_INDEX_URL="${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}"'
+    )
 
     if has_py:
         py_req = pkg / "python" / "requirements.txt"
         if py_req.exists():
-            lines.append(f"pip install -r python/requirements.txt")
+            lines.append(
+                'pip install -i "$PIP_INDEX_URL" -r python/requirements.txt'
+            )
         else:
-            lines.append("pip install pyaxengine numpy")
+            lines.append('pip install -i "$PIP_INDEX_URL" pyaxengine numpy')
 
     if has_cpp:
         lines.append("")
