@@ -86,6 +86,10 @@ PUBLISH 目标/仓库/凭据。
 - HuggingFace：默认 `HF_ENDPOINT=https://hf-mirror.com`，海外用户置空字符串直连
 - GitHub：git clone / raw 下载默认经 `GH_PROXY=https://gh-proxy.com`
 - uv / pip：默认 PyPI 阿里云镜像 `PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/`
+- 环境复用：大包（torch/onnxruntime/transformers 等）只装一次到共享 base venv
+  （`python -m magnetar.env_util base`，`MAGNETAR_BASE_VENV` 可覆盖）；任务用
+  `create_task_venv()` 建薄 venv（.pth 链接 base，任务包优先），VENV_PATH 固化进
+  TASK_DIR/config.json，不重复装大包
 - 全部可通过 `.magnetarrc` 或环境变量覆盖（置空即禁用镜像）
 
 ## 常用输入（yaml inputs 段，环境变量可覆盖）

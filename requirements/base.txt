@@ -1,0 +1,22 @@
+# Magnetar 共享 base 环境依赖（大包只装一次，任务 venv 经 system-site-packages 复用）
+#
+# 注意：
+# - torch / torchvision 不走本文件，由 magnetar/env_util.py 单独从 PyTorch CPU index
+#   （https://download.pytorch.org/whl/cpu）安装，避免装进 CUDA 全家桶；
+# - 改动本文件后 ensure_base_env() 会检测 marker 哈希变化并自动重建 base venv。
+
+onnx==1.22.0
+onnxruntime==1.23.2
+onnxsim>=0.4.0
+numpy>=1.24
+scipy>=1.10
+pillow>=10.0
+opencv-python-headless>=4.8
+transformers>=4.40
+tokenizers>=0.15
+safetensors>=0.4
+sentencepiece>=0.1.99
+protobuf>=3.20
+psutil>=5.9
+huggingface_hub>=0.23
+tqdm>=4.66

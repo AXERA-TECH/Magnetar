@@ -55,6 +55,10 @@ PULSAR2_HOME=
 # Pulsar2 Docker 镜像（PULSAR2_HOME 未命中时才使用；留空自动从默认路径获取）
 # PULSAR2_IMAGE=
 
+# 共享 base 转换环境（torch/onnxruntime/transformers 等大包只装一次）。
+# 留空默认 ~/.cache/magnetar/base-venv；任务薄 venv 经 .pth 链接复用
+# MAGNETAR_BASE_VENV=
+
 # ===== LLM / 自回归模型（ax-llm 路由，可选）=====
 # 模型被判定为自回归/类 LLM 时自动走 ax-llm 路径（pulsar2 llm_build2 + axllm），
 # 以下参数仅在需要覆盖默认值时设置：

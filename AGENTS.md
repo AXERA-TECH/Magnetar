@@ -129,6 +129,14 @@ STOP 前先向用户提议上 QAT（量化感知训练）：
 - QAT.axera 基础 fake-quant 链路可用，但训练稳定性需先做 toy sanity（见 `issues/melotts_pipeline_issues.md` QAT 追加记录）
 - QAT 需要训练数据和训练时间，成本高；用户确认后才进入，通常退回 EXPORT 重新导出 QDQ ONNX
 
+### 环境复用（避免重复装大包）
+- 大包只装一次：`python -m magnetar.env_util base`（默认 `~/.cache/magnetar/base-venv`，
+  `MAGNETAR_BASE_VENV` 可覆盖；依赖清单 `requirements/base.txt` 变化才自动重建）
+- 每个任务用 `magnetar.env_util.create_task_venv(task_dir, extra_packages=...)` 建薄 venv
+  （.pth 链接 base，任务本地包优先），路径固化到 TASK_DIR/config.json 的 VENV_PATH；
+  禁止每个模型重建完整 torch/transformers 大环境
+- 后续阶段解释器统一取 `magnetar.env_util.resolve_task_python(task_dir)`
+
 ### 编译
 ONNX 必须静态 shape。编译前用 ONNX Runtime 验证。
 
