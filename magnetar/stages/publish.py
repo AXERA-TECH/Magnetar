@@ -4,7 +4,7 @@ STOP 点：询问用户发布目标、仓库名、凭据。
 GitHub → 源码 + model_convert（客户可复现）
 HuggingFace → 预编译模型（客户直接用），不含 model_convert/ 和 C++ 源码
 """
-import os, shutil, subprocess, tempfile
+import json, os, shutil, subprocess, tempfile
 from pathlib import Path
 from typing import Literal
 
@@ -62,6 +62,42 @@ def _publish_github(pkg: Path, repo_name: str, token: str | None, org: str | Non
         return {"ok": False, "url": public_url, "errors": [f"Git push 失败: {e.stderr}"]}
 
 
+def _infer_pipeline_tag(task: str) -> str:
+    """由任务类型推断 HF pipeline_tag（宽松子串匹配）。"""
+    t = (task or "").lower()
+    if any(k in t for k in ("noise", "audio", "speech", "tts", "voice", "vocoder", "asr", "vad")):
+        return "audio-to-audio"
+    if any(k in t for k in ("text", "llm", "chat", "generation", "question-answering")):
+        return "text-generation"
+    if any(k in t for k in ("detection", "detect", "segment")):
+        return "object-detection"
+    if any(k in t for k in ("classif", "image", "vision", "ocr")):
+        return "image-classification"
+    return "other"
+
+
+def _build_hf_frontmatter(flow: dict | None, meta: dict | None, model_name: str) -> str:
+    """生成 HF README 的 YAML frontmatter。
+
+    license 优先取 model_flow.json（ACQUIRE 已按源仓库 LICENSE 推断），
+    其次 model_meta.json，再没有就由调用方兜底（mit）。
+    """
+    flow = flow or {}
+    meta = meta or {}
+    task = str(flow.get("task") or meta.get("task") or "")
+    pipeline_tag = _infer_pipeline_tag(task)
+    license_id = str(flow.get("license") or meta.get("license") or "mit")
+    return f"""---
+license: {license_id}
+pipeline_tag: {pipeline_tag}
+tags:
+- axmodel
+- axera
+- {model_name}
+---
+"""
+
+
 def _publish_huggingface(pkg: Path, repo_name: str, token: str | None,
                           org: str | None, model_name: str) -> dict:
     """发布到 HuggingFace：仅上传预编译模型 + Python SDK。
@@ -86,19 +122,30 @@ def _publish_huggingface(pkg: Path, repo_name: str, token: str | None,
         # 上传空白 config.json 用于 HF 下载追踪
         (hf_dir / "config.json").write_text("{}", encoding="utf-8")
 
-        # HF README 加 YAML frontmatter
+        # HF README 加 YAML frontmatter：
+        # - task/license 优先读 ACQUIRE 记录的 model_flow.json（origin/）
+        # - license 缺省按源仓库 LICENSE 推断（infer_source_license），再无则 mit
         readme = hf_dir / "README.md"
         if readme.exists():
             original = readme.read_text(encoding="utf-8")
-            frontmatter = f"""---
-license: apache-2.0
-pipeline_tag: image-classification
-tags:
-- axmodel
-- axera
-- {model_name}
----
-"""
+            flow: dict = {}
+            flow_path = pkg.parent / "origin" / "model_flow.json"
+            if flow_path.is_file():
+                try:
+                    flow = json.loads(flow_path.read_text(encoding="utf-8"))
+                except Exception:
+                    flow = {}
+            meta: dict = {}
+            meta_path = hf_dir / "models" / "model_meta.json"
+            if meta_path.exists():
+                try:
+                    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                except Exception:
+                    meta = {}
+            if not flow.get("license") and not meta.get("license"):
+                from magnetar.stages.acquire import infer_source_license
+                flow["license"] = infer_source_license(pkg.parent / "origin") or "mit"
+            frontmatter = _build_hf_frontmatter(flow, meta, model_name)
             readme.write_text(frontmatter + original, encoding="utf-8")
 
         # 用 huggingface_hub 上传
