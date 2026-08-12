@@ -515,7 +515,7 @@ def llm_build(task_dir: Path, input_path: Path, chip: str = "AX650",
 
 def install_axllm(board: dict, timeout: int = 1800) -> str:
     """确保板端 axllm 可用；缺失时用官方 install.sh 安装，返回版本输出。"""
-    from magnetar.board_util import ssh
+    from magnetar.board_util import board_lease, ssh
     repo = os.environ.get("AX_LLM_REPO", AX_LLM_REPO)
     branch = os.environ.get("AX_LLM_BRANCH", AX_LLM_BRANCH)
     install_url = os.environ.get("AXLLM_INSTALL_URL") or (
@@ -529,19 +529,41 @@ def install_axllm(board: dict, timeout: int = 1800) -> str:
         return out
     except RuntimeError:
         pass
-    ssh(board, f"curl -fsSL {install_url} | bash", timeout=timeout, max_tail=200)
+    # 安装属一次性板端环境变更：持短租约防止多任务并发安装互相踩踏
+    with board_lease(board, note="axllm install", ttl=600):
+        try:
+            return ssh(board, "which axllm && axllm --help 2>&1 | head -3", 30)
+        except RuntimeError:
+            pass
+        ssh(board, f"curl -fsSL {install_url} | bash", timeout=timeout, max_tail=200)
     return ssh(board, "axllm --help 2>&1 | head -3", 30)
 
 
 def serve_axllm(board: dict, model_dir: Path, port: int = 8000,
                 remote_root: str | None = None) -> str:
-    """上传 LLM 模型目录并启动 axllm serve，返回远端模型目录路径。"""
-    from magnetar.board_util import scp_to, ssh
-    rd = remote_root or f"/tmp/magnetar_llm_{int(time.time())}"
-    ssh(board, f"rm -rf {rd} && mkdir -p {rd}", 30)
-    scp_to(board, model_dir, f"{rd}/model")
-    ssh(board, f"mkdir -p {rd}/model && mv {rd}/model/* {rd}/model/ 2>/dev/null || true", 30)
-    ssh(board, f"nohup axllm serve {rd}/model --port {port} > {rd}/serve.log 2>&1 & echo $!", 30)
+    """上传 LLM 模型目录并启动 axllm serve，返回远端模型目录路径。
+
+    目录一律放板端租约命名空间（/tmp/magnetar-lease/<token>/serve），
+    绝不直接 /tmp；停止用 ``stop_serve(board, rd)`` 按 PID 精确停止。
+    """
+    from magnetar.board_util import acquire_board_lease, board_workdir, scp_to, ssh
+    if remote_root:
+        rd, token = remote_root, ""
+    else:
+        lease = acquire_board_lease(board, note=f"axllm serve {port}", ttl=43200)
+        rd, token = board_workdir(lease, "serve"), lease.token
+    ssh(board, f"mkdir -p {rd}/model_stage {rd}/model", 30)
+    scp_to(board, model_dir, f"{rd}/model_stage")
+    ssh(board, (
+        f"mv -f {rd}/model_stage/* {rd}/model/ 2>/dev/null || true; "
+        f"rm -rf {rd}/model_stage"
+    ), 30)
+    out = ssh(board, (
+        f"nohup axllm serve {rd}/model --port {port} > {rd}/serve.log 2>&1 & echo $!"
+    ), 30)
+    pid = (out.strip().splitlines() or ["0"])[-1].strip() or "0"
+    ssh(board, f"echo '{{\"pid\": \"{pid}\", \"token\": \"{token}\", \"rd\": \"{rd}\"}}' "
+               f"> {rd}/serve.json", 30)
     deadline = time.time() + 180
     while time.time() < deadline:
         ok = ssh(
@@ -556,9 +578,42 @@ def serve_axllm(board: dict, model_dir: Path, port: int = 8000,
     raise RuntimeError(f"axllm serve 未就绪（{port}）:\n{log}")
 
 
-def stop_serve(board: dict):
-    from magnetar.board_util import ssh
-    ssh(board, "pkill -f 'axllm serve' || true", 30)
+def stop_serve(board: dict, rd: str | None = None):
+    """按 PID 精确停止自己的 axllm serve 并释放租约（绝不 pkill 全板）。
+
+    Args:
+        rd: serve_axllm 返回的远端目录（必填）；未提供时拒绝执行，防止误杀他人服务。
+    """
+    import json as _json
+    from magnetar.board_util import BOARD_LEASE_ROOT, ssh
+    if not rd:
+        raise RuntimeError(
+            "stop_serve 需要传入 serve_axllm 返回的远端目录 rd；"
+            "禁止 pkill 全板 axllm（会杀掉别人的服务）"
+        )
+    rd = rd.rstrip("/")
+    info = ssh(board, f"cat {rd}/serve.json 2>/dev/null", 30, max_tail=200)
+    pid, token = "", ""
+    if "{" in info:
+        try:
+            d = _json.loads(info[info.index("{"):])
+            pid, token = str(d.get("pid", "")), str(d.get("token", ""))
+        except Exception:
+            pass
+    if pid and pid != "0":
+        # 安全校验：该 pid 的 cmdline 必须确实含 axllm，才精确 kill
+        ssh(board, (
+            f"kill -0 {pid} 2>/dev/null && "
+            f"grep -q axllm /proc/{pid}/cmdline 2>/dev/null && kill {pid} || true"
+        ), 30)
+    if token:
+        ssh(board, f"rm -rf {BOARD_LEASE_ROOT}/{token}", 60)
+        ssh(board, (
+            f"grep -qF '{token}' {BOARD_LEASE_ROOT}/lock/lease.json 2>/dev/null "
+            f"&& rm -rf {BOARD_LEASE_ROOT}/lock"
+        ), 30)
+    else:
+        ssh(board, f"rm -rf {rd}", 30)
 
 
 def validate_chat(api_url: str, model_name: str, prompts: list[str],

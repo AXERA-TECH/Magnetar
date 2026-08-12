@@ -13,7 +13,9 @@
   所有临时文件只在 `/tmp/magnetar-lease/<token>/` 命名空间下，绝不清理他人环境
 - LLM 分支：有板 → 装 axllm（`magnetar.stages.llm.install_axllm`）+ `axllm serve
   compile/llm_model_dir`，OpenAI 兼容接口 ≥3 组 prompt greedy 语义验证
-  （`validate_chat`，记录响应非空/token 数/耗时）；无板 → 回退
+  （`validate_chat`，记录响应非空/token 数/耗时）；serve 目录在板端租约命名空间
+  （/tmp/magnetar-lease/<token>/serve），验证完用 `stop_serve(board, rd)` 按 PID
+  精确停止（rd 为 serve_axllm 返回值，禁止 pkill 全板）；无板 → 回退
   `llm_build2 --check_level 2 --prompt ...` 逐层 cosine 校验（`_extract_cosims`），
   语义验证留给 RUNONBOARD
 - 后置：`accuracy_gate`（general cosine ≥ 0.99；llm 逐层 cosine min ≥ 0.99；
