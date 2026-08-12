@@ -71,7 +71,7 @@ def run_mobilenet_cpp(task_dir: Path, target_hw: str) -> None:
         set(CMAKE_CXX_STANDARD 14)
         include_directories(include ${AX_RUNTIME_ROOT}/include)
         link_directories(${AX_RUNTIME_ROOT}/lib)
-add_library(mobilenet_sdk STATIC src/mobilenet_runner.cpp)
+        add_library(mobilenet_sdk STATIC src/mobilenet_runner.cpp)
         target_link_libraries(mobilenet_sdk ax_engine ax_interpreter ax_sys pthread dl atomic)
         add_executable(mobilenet_example examples/main.cpp)
         target_link_libraries(mobilenet_example mobilenet_sdk)
