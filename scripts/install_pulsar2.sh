@@ -9,10 +9,22 @@ log_error() { echo -e "${RED}[ERROR]${NC} $*"; }
 PULSAR2_VERSION="${PULSAR2_VERSION:-6.0}"
 PULSAR2_FILE="ax_pulsar2_${PULSAR2_VERSION}.tar.gz"
 PULSAR2_URL="${PULSAR2_URL:-}"
-PULSAR2_MODELSCOPE_URL="https://modelscope.cn/models/AXERA-TECH/Pulsar2/resolve/master/${PULSAR2_VERSION}/${PULSAR2_FILE}"
-PULSAR2_HF_URL="https://hf-mirror.com/AXERA-TECH/Pulsar2/resolve/main/${PULSAR2_VERSION}/${PULSAR2_FILE}"
+PULSAR2_MODELSCOPE_BASE="https://modelscope.cn/models/AXERA-TECH/Pulsar2/resolve/master/${PULSAR2_VERSION}"
+PULSAR2_HF_BASE="https://hf-mirror.com/AXERA-TECH/Pulsar2/resolve/main/${PULSAR2_VERSION}"
+PULSAR2_MODELSCOPE_URL="${PULSAR2_MODELSCOPE_BASE}/${PULSAR2_FILE}"
+PULSAR2_HF_URL="${PULSAR2_HF_BASE}/${PULSAR2_FILE}"
 PULSAR2_IMAGE_TAG="pulsar2:${PULSAR2_VERSION}"
 CACHE_DIR="${HOME}/.cache/magnetar"
+
+# 执行模式：package（官方独立安装包，默认推荐）| docker（镜像，兜底）
+PULSAR2_MODE="${PULSAR2_MODE:-package}"
+# package 模式子选项：lite（无 GPU，默认）| full（含 GPU 依赖）
+PULSAR2_PACKAGE="${PULSAR2_PACKAGE:-lite}"
+if [ "${PULSAR2_PACKAGE}" = "full" ]; then
+    PULSAR2_PKG_FILE="ax_pulsar2_${PULSAR2_VERSION}_package.tar.gz"
+else
+    PULSAR2_PKG_FILE="ax_pulsar2_${PULSAR2_VERSION}_lite_package.tar.gz"
+fi
 
 # 下载顺序：显式 PULSAR2_URL > ModelScope（国内快） > hf-mirror（回退）
 download_pulsar2() {
@@ -48,10 +60,45 @@ download_pulsar2() {
 
 echo ""
 echo "============================================"
-echo "  Magnetar Pulsar2 + Docker Installer"
-echo "  Pulsar2 Version: ${PULSAR2_VERSION}"
+echo "  Magnetar Pulsar2 Installer"
+echo "  Version: ${PULSAR2_VERSION}  Mode: ${PULSAR2_MODE}${PULSAR2_PACKAGE:+ (${PULSAR2_PACKAGE})}"
 echo "============================================"
 echo ""
+
+install_package() {
+    local home_dir="${CACHE_DIR}/pulsar2/${PULSAR2_VERSION}"
+    if [ -x "${home_dir}/bin/pulsar2" ]; then
+        log_info "Pulsar2 独立包已安装: ${home_dir}"
+        return 0
+    fi
+    mkdir -p "${CACHE_DIR}" "${home_dir}"
+    local pkg_path="${CACHE_DIR}/${PULSAR2_PKG_FILE}"
+    if [ ! -f "${pkg_path}" ]; then
+        local pkg_url="${PULSAR2_URL}"
+        [ -n "${pkg_url}" ] || pkg_url="${PULSAR2_MODELSCOPE_BASE}/${PULSAR2_PKG_FILE}"
+        download_pulsar2 "${pkg_url}" "${PULSAR2_MODELSCOPE_BASE}/${PULSAR2_PKG_FILE}" \
+            "${PULSAR2_HF_BASE}/${PULSAR2_PKG_FILE}"
+    fi
+    log_info "解压独立包（${PULSAR2_PKG_FILE}，约 1-5 GB，需要一点时间）..."
+    tar -xzf "${pkg_path}" -C "${home_dir}" --strip-components=1
+    if [ ! -x "${home_dir}/bin/pulsar2" ]; then
+        log_error "解压后未找到 ${home_dir}/bin/pulsar2，请检查包完整性"
+        return 1
+    fi
+    log_info "验证 Pulsar2 独立包..."
+    "${home_dir}/bin/pulsar2" version 2>&1 | tail -5 || true
+    log_info "Pulsar2 独立包安装完成: ${home_dir}"
+    echo "  export PULSAR2_HOME=${home_dir}"
+}
+
+if [ "${PULSAR2_MODE}" = "package" ]; then
+    install_package
+    echo ""
+    log_info "============================================"
+    log_info "  安装完成！使用方式：export PULSAR2_HOME=${CACHE_DIR}/pulsar2/${PULSAR2_VERSION}"
+    log_info "============================================"
+    exit 0
+fi
 
 if command -v docker &>/dev/null && docker info &>/dev/null 2>&1; then
     log_info "Docker already installed: $(docker --version)"

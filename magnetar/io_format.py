@@ -9,6 +9,9 @@
 
 成功案例与官方文档依据见 ``docs/input-format-cheatsheet.md``。
 """
+import io
+from pathlib import Path
+
 import numpy as np
 
 
@@ -52,3 +55,93 @@ def pack_calibration_npy(files, tar_path) -> None:
     with tarfile.open(tar_path, "w:gz") as tar:
         for npy in sorted(files):
             tar.add(npy, arcname=npy.name)
+
+
+def validate_calibration_archive(
+    archive_path,
+    tensor_name: str,
+    expected_shape,
+    expected_dtype=np.float32,
+    min_samples: int = 1,
+    max_check: int = 8,
+) -> dict:
+    """校验 Numpy 校准 tar/tar.gz 内容是否与模型输入一致（COMPILE 前预检）。
+
+    规则（与 docs/input-format-cheatsheet.md 一致）：
+    - tar 内含 ``.npy`` 文件（float32、带 batch 维、shape 与 input_shapes 一致）
+    - 样本数至少 ``min_samples``（一般传 calibration_size；Pulsar2 会对
+      calibration_size 与数据集大小取 min，样本不足只会警告不会失败）
+    - ``tensor_name`` 仅用于错误提示，不检查文件名
+
+    Returns:
+        {"samples": int, "errors": [str], "warnings": [str]}
+    """
+    import tarfile
+
+    result: dict = {"samples": 0, "errors": [], "warnings": []}
+    path = Path(archive_path)
+    if not path.is_file():
+        result["errors"].append(
+            f"校准包不存在: {path}（应先生成校准数据，参考 "
+            "docs/input-format-cheatsheet.md §1）"
+        )
+        return result
+    try:
+        tar = tarfile.open(path, "r:*")
+    except (tarfile.TarError, OSError) as e:
+        result["errors"].append(f"校准包不是合法 tar/tar.gz: {path}（{e}）")
+        return result
+    with tar:
+        members = [m for m in tar.getmembers() if m.isfile() and m.name.endswith(".npy")]
+        if not members:
+            result["errors"].append(
+                f"校准包内没有 .npy 文件: {path}（Numpy 格式要求 tar 内含 npy）"
+            )
+            return result
+        result["samples"] = len(members)
+        if result["samples"] < min_samples:
+            result["errors"].append(
+                f"校准样本数 {result['samples']} < 要求 {min_samples}（{path}）"
+            )
+        exp_shape = tuple(int(d) for d in expected_shape)
+        for m in members[:max_check]:
+            try:
+                f = tar.extractfile(m)
+                arr = np.load(io.BytesIO(f.read()), allow_pickle=False)
+            except Exception as e:
+                result["errors"].append(f"npy 无法读取: {m.name}（{e}）")
+                continue
+            if tuple(arr.shape) != exp_shape:
+                result["errors"].append(
+                    f"npy shape 不符: {m.name} shape={tuple(arr.shape)}，"
+                    f"期望 {exp_shape}（样本必须带 batch 维且与 input_shapes 完全一致）"
+                )
+            if arr.dtype != np.dtype(expected_dtype):
+                result["errors"].append(
+                    f"npy dtype 不符: {m.name} dtype={arr.dtype}，期望 {np.dtype(expected_dtype)}"
+                )
+        if len(members) > max_check:
+            result["warnings"].append(
+                f"仅抽查前 {max_check} 个样本（共 {len(members)} 个），其余未逐个体检"
+            )
+    return result
+
+
+def assert_calibration_archive_ok(
+    archive_path,
+    tensor_name: str,
+    expected_shape,
+    expected_dtype=np.float32,
+    min_samples: int = 1,
+) -> int:
+    """校准包预检的硬 gate：不通过直接抛 RuntimeError（带修复提示）。"""
+    res = validate_calibration_archive(
+        archive_path, tensor_name, expected_shape, expected_dtype, min_samples
+    )
+    if res["errors"]:
+        raise RuntimeError(
+            "校准数据预检未通过（" + "; ".join(res["errors"]) + "）\n"
+            "修复提示: 重新生成校准包（scripts/export_onnx.py 或 run_generic(calibration_data=...)，"
+            "样本 float32、带 batch 维、shape 与 ONNX 输入一致）"
+        )
+    return res["samples"]

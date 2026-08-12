@@ -42,11 +42,18 @@ SDK_LANG=both
 
 # ===== Pulsar2 编译环境 =====
 
-# Pulsar2 Docker 镜像（留空则自动从默认路径获取）
-PULSAR2_IMAGE=
+# Pulsar2 执行后端：官方独立安装包（默认，推荐）| docker（兜底）。
+# 独立包用 scripts/install_pulsar2.sh 安装（PULSAR2_MODE=package），
+# 或手动解压 ax_pulsar2_*_package.tar.gz 后用 PULSAR2_HOME 指定目录。
+# 未设置 PULSAR2_HOME 时自动扫描 ~/.cache/magnetar/pulsar2/<版本>/，
+# 找不到再回退 Docker 镜像。
+PULSAR2_HOME=
 
-# Pulsar2 本地可执行文件路径（留空则使用 Docker）
-PULSAR2_BIN=
+# 独立包下载变体: lite（无 GPU，默认）| full（含 GPU 依赖）
+# PULSAR2_PACKAGE=lite
+
+# Pulsar2 Docker 镜像（PULSAR2_HOME 未命中时才使用；留空自动从默认路径获取）
+# PULSAR2_IMAGE=
 
 # ===== LLM / 自回归模型（ax-llm 路由，可选）=====
 # 模型被判定为自回归/类 LLM 时自动走 ax-llm 路径（pulsar2 llm_build2 + axllm），

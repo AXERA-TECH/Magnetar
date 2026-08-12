@@ -4,7 +4,10 @@ from pathlib import Path
 import numpy as np
 
 def run(task_dir: Path, sample: np.ndarray, target_hw: str, pwd: str, cpp_binary: Path | None = None) -> dict | None:
-    from magnetar.board_util import ensure_remote_infer, select_board, ssh, scp_to, scp_from
+    from magnetar.board_util import (
+        ensure_remote_infer, probe_board_env, select_board,
+        ssh, scp_to, scp_from, suggest_ld_library_path,
+    )
     board = select_board(target_hw, pwd)
     if board is None:
         from magnetar.stages.state import mark_stage
@@ -16,6 +19,26 @@ def run(task_dir: Path, sample: np.ndarray, target_hw: str, pwd: str, cpp_binary
     except Exception as e:
         print(f"[RUNONBOARD] ensure_remote_infer 失败（忽略，继续上板）: {e}")
     rb = task_dir / "runonboard"; rb.mkdir(parents=True, exist_ok=True)
+    # 探测板端运行环境：LD_LIBRARY_PATH 不再硬编码 /soc/lib，pyaxengine 缺失直接提示
+    ld_library_path = "/soc/lib"
+    try:
+        env = probe_board_env(board)
+        (rb / "board_env.json").write_text(
+            json.dumps(env, indent=2, ensure_ascii=False), encoding="utf-8")
+        ld_library_path = suggest_ld_library_path(env)
+        print(f"[RUNONBOARD] board env: chip={env['chip_type']} "
+              f"pyaxengine={env['pyaxengine']} LD_LIBRARY_PATH={ld_library_path}")
+        if not env.get("pyaxengine"):
+            raise RuntimeError(
+                f"板端 {board['host']} python3 无法 import axengine（pyaxengine 未安装）——"
+                f"请先在板端执行: pip3 install pyaxengine"
+                f"（探测详情: {env.get('pyaxengine_error', '')}，完整信息见 runonboard/board_env.json）"
+            )
+    except RuntimeError:
+        raise
+    except Exception as e:
+        (rb / "board_env_probe_failed.log").write_text(str(e), encoding="utf-8")
+        print(f"[RUNONBOARD] board env probe failed: {e}, fallback LD_LIBRARY_PATH=/soc/lib")
     in_npy = rb / "input.npy"; in_bin = rb / "input.bin"
     np.save(in_npy, sample.astype(np.float32)); sample.astype(np.float32).tofile(in_bin)
     rd = f"/tmp/magnetar_{os.getpid()}"
@@ -33,12 +56,12 @@ def run(task_dir: Path, sample: np.ndarray, target_hw: str, pwd: str, cpp_binary
     sdk_entry = f"package/python/{pkg_name}/example.py"
     if not (task_dir / "package" / "python" / pkg_name / "example.py").is_file():
         sdk_entry = "package/python/mobilenet_sdk/example.py"
-    py_log = ssh(board, f"cd {rd} && LD_LIBRARY_PATH=/soc/lib PYTHONPATH=$PWD/package/python python3 {sdk_entry} --model package/models/model.axmodel --input input.npy --output-dir py_out", timeout=240, max_tail=200)
+    py_log = ssh(board, f"cd {rd} && LD_LIBRARY_PATH={ld_library_path} PYTHONPATH=$PWD/package/python python3 {sdk_entry} --model package/models/model.axmodel --input input.npy --output-dir py_out", timeout=240, max_tail=200)
     cpp_log = ""
     if cpp_binary and cpp_binary.exists():
         scp_to(board, cpp_binary, f"{rd}/mobilenet_example")
         ssh(board, f"chmod +x {rd}/mobilenet_example")
-        cpp_log = ssh(board, f"cd {rd} && LD_LIBRARY_PATH=/soc/lib ./mobilenet_example package/models/model.axmodel input.bin cpp_out && ls cpp_out", timeout=240, max_tail=200)
+        cpp_log = ssh(board, f"cd {rd} && LD_LIBRARY_PATH={ld_library_path} ./mobilenet_example package/models/model.axmodel input.bin cpp_out && ls cpp_out", timeout=240, max_tail=200)
     scp_from(board, f"{rd}/py_out", rb / "py_out")
     py_outputs = sorted((rb / "py_out").glob("output_*.npy"))
     if not py_outputs:

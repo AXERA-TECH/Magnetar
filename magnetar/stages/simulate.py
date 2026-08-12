@@ -66,7 +66,10 @@ def run(task_dir: Path, sample: np.ndarray, pulsar_image: str,
 def _run_on_board(task_dir: Path, sample: np.ndarray, onnx_out: np.ndarray,
                   board: dict, output_name: str, input_name: str) -> dict:
     """板端 ax_run_model 快速通道。"""
-    from magnetar.board_util import ensure_remote_infer, ssh, scp_to, scp_from
+    from magnetar.board_util import (
+        ensure_remote_infer, probe_board_env, require_board_runtime,
+        ssh, scp_to, scp_from,
+    )
     from magnetar.io_format import read_ax_run_model_output, write_ax_run_model_input
 
     # 上板先确保 ax_remote_infer daemon 已装（18500 不通则静默安装），装后可扫端口发现板子
@@ -76,6 +79,20 @@ def _run_on_board(task_dir: Path, sample: np.ndarray, onnx_out: np.ndarray,
         print(f"[SIMULATE] ensure_remote_infer 失败（忽略，继续上板）: {e}")
 
     sd = task_dir / "simulate"
+    # 探测板端运行环境：ax_run_model 路径不再硬编码 /opt/bin
+    try:
+        env = probe_board_env(board)
+        (sd / "board_env.json").write_text(
+            json.dumps(env, indent=2, ensure_ascii=False), encoding="utf-8")
+        require_board_runtime(board, env, need_pyaxengine=False)
+        ax_run_model = env["ax_run_model"]
+        print(f"[SIMULATE] board env: chip={env['chip_type']} "
+              f"ax_run_model={ax_run_model} pyaxengine={env['pyaxengine']}")
+    except Exception as e:
+        (sd / "board_env_probe_failed.log").write_text(str(e), encoding="utf-8")
+        print(f"[SIMULATE] board env probe failed: {e}, fallback /opt/bin/ax_run_model")
+        ax_run_model = "/opt/bin/ax_run_model"
+
     remote = f"/tmp/magnetar_sim_{os.getpid()}"
     ssh(board, f"rm -rf {remote} && mkdir -p {remote}/input {remote}/output")
 
@@ -91,12 +108,12 @@ def _run_on_board(task_dir: Path, sample: np.ndarray, onnx_out: np.ndarray,
     # 运行 ax_run_model
     ssh(board,
         f"cd {remote} && "
-        f"/opt/bin/ax_run_model -m model.axmodel "
+        f"{ax_run_model} -m model.axmodel "
         f"-i input_dir -o output -l input_dir/input_list.txt -w 0 -r 1",
         timeout=120)
 
     # 下载结果
-    scp_from(board, f"{remote}/output", sd / "board_output")
+    scp_from(board, f"{remote}/output", sd / "board_output", recursive=True)
 
     # 读取 ax_run_model 输出
     output_dir = sd / "board_output"
@@ -111,15 +128,27 @@ def _run_on_board(task_dir: Path, sample: np.ndarray, onnx_out: np.ndarray,
 
 def _run_pulsar2(task_dir: Path, sample: np.ndarray, onnx_out: np.ndarray,
                  pulsar_image: str, sd: Path, input_name: str, output_name: str) -> dict:
-    """Pulsar2 Docker 仿真（慢速回退）。"""
-    from magnetar.docker_util import docker_pulsar2
+    """Pulsar2 仿真（独立包/镜像通用，慢速回退）。"""
+    from magnetar.docker_util import parse_backend, run_pulsar2
     from magnetar.io_format import read_pulsar2_run_output, write_pulsar2_run_input
     ind = sd / "input"; outd = sd / "output"
     ind.mkdir(parents=True, exist_ok=True); outd.mkdir(parents=True, exist_ok=True)
     write_pulsar2_run_input(ind, input_name, sample)
-    docker_pulsar2(pulsar_image, str(task_dir.resolve()),
-        "pulsar2 run --model /workspace/compile/model.axmodel "
-        "--input_dir /workspace/simulate/input --output_dir /workspace/simulate/output",
+    kind, _ = parse_backend(pulsar_image)
+    if kind == "docker":
+        model, in_dir, out_dir = (
+            "/workspace/compile/model.axmodel",
+            "/workspace/simulate/input",
+            "/workspace/simulate/output",
+        )
+    else:
+        model, in_dir, out_dir = (
+            str(task_dir / "compile" / "model.axmodel"),
+            str(ind),
+            str(outd),
+        )
+    run_pulsar2(pulsar_image, str(task_dir.resolve()),
+        f"pulsar2 run --model {model} --input_dir {in_dir} --output_dir {out_dir}",
         timeout=900,
         log_file=sd / "pulsar2_run.log")
     ax_out = read_pulsar2_run_output(outd, output_name, onnx_out.shape)

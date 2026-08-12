@@ -236,11 +236,33 @@ def build_llm_command(input_rel: str, output_rel: str, chip: str,
     return " ".join(args)
 
 
-def _run_docker(image: str, workspace: str, command: str, timeout: int,
-                log_file: Path):
-    from magnetar.docker_util import docker_pulsar2
-    return docker_pulsar2(image, workspace, command, timeout=timeout,
-                          log_file=log_file, max_tail=400)
+def _run_pulsar2(backend: str, workspace: str, command: str, timeout: int,
+                 log_file: Path):
+    from magnetar.docker_util import run_pulsar2
+    return run_pulsar2(backend, workspace, command, timeout=timeout,
+                       log_file=log_file, max_tail=400)
+
+
+def _reproducible_cmd(backend: str, cmd: str) -> str:
+    """生成可复现的 llm_build2 命令片段（docker/独立包按后端区分）。"""
+    from magnetar.docker_util import parse_backend
+
+    kind, name = parse_backend(backend)
+    if kind == "docker":
+        return f"docker run --rm -v \"$PWD\":/workspace {name} -lc '{cmd}'"
+    parts = cmd.split()
+    i = 0
+    while i < len(parts) and "=" in parts[i] and not parts[i].startswith("--"):
+        i += 1
+    if i < len(parts) and parts[i] == "pulsar2":
+        i += 1
+    args = " ".join(parts[i:])
+    return (
+        f"export PULSAR2_HOME=\"{name}\"\n"
+        f"\"$PULSAR2_HOME/lib/ld-linux-x86-64.so.2\" "
+        f"\"$PULSAR2_HOME/python3/bin/python3\" "
+        f"\"$PULSAR2_HOME/pulsar2/axnn/yamain/main.py\" {args}"
+    )
 
 
 def ensure_axllm_build_tools(task_dir: Path) -> Path:
@@ -356,7 +378,7 @@ def llm_build(task_dir: Path, input_path: Path, chip: str = "AX650",
     同时产出 export/model_meta.json（LLM 版）、compile/compile_report.md、
     export/llm_build.sh（可复现脚本）。
     """
-    from magnetar.docker_util import latest_pulsar2_image
+    from magnetar.docker_util import parse_backend, resolve_backend
     from magnetar.stages.state import mark_stage
 
     task_dir = Path(task_dir)
@@ -371,9 +393,11 @@ def llm_build(task_dir: Path, input_path: Path, chip: str = "AX650",
     out_dir.mkdir(parents=True, exist_ok=True)
     output_rel = "compile/llm_out"
 
-    image = pulsar_image or latest_pulsar2_image()
+    backend = pulsar_image or resolve_backend()
+    kind, _ = parse_backend(backend)
+    mount_root = "/workspace" if kind == "docker" else str(task_dir.resolve())
     cmd = build_llm_command(
-        f"/workspace/{input_rel}", f"/workspace/{output_rel}", chip,
+        f"{mount_root}/{input_rel}", f"{mount_root}/{output_rel}", chip,
         max_context=max_context, prefill_len=prefill_len,
         prefill_step_size=prefill_step_size,
         decode_step_size=decode_step_size,
@@ -381,7 +405,7 @@ def llm_build(task_dir: Path, input_path: Path, chip: str = "AX650",
         parallel=parallel, check_level=check_level, prompt=prompt,
     )
     log_file = compile_dir / "llm_build.log"
-    _run_docker(image, str(task_dir), cmd, timeout=10800, log_file=log_file)
+    _run_pulsar2(backend, str(task_dir), cmd, timeout=10800, log_file=log_file)
 
     tools = ensure_axllm_build_tools(task_dir)
     _process_embedding(tools, input_host, out_dir)
@@ -462,13 +486,13 @@ def llm_build(task_dir: Path, input_path: Path, chip: str = "AX650",
         "#!/usr/bin/env bash\nset -euo pipefail\n"
         "# 可复现的 LLM 编译命令（在 TASK_DIR 根目录执行）\n"
         f"cd \"$(dirname \"$0\")/..\"\n"
-        f"docker run --rm -v \"$PWD\":/workspace {image} -lc '{cmd}'\n",
+        f"{_reproducible_cmd(backend, cmd)}\n",
         encoding="utf-8")
     (task_dir / "export" / "llm_build.sh").chmod(0o755)
 
     (compile_dir / "compile_report.md").write_text(
         "# LLM Compile Report\n\n"
-        f"- image: {image}\n- chip: {chip}\n"
+        f"- backend: {backend}\n- chip: {chip}\n"
         f"- weight_type: {weight_type}, hidden_state_type: {hidden_state_type}\n"
         f"- max_context: {max_context}, prefill_len: {prefill_len}, "
         f"prefill_step_size: {prefill_step_size or 'auto'}\n"

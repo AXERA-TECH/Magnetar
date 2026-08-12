@@ -17,10 +17,12 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
 from magnetar.io_format import (  # noqa: E402
+    assert_calibration_archive_ok,
     pack_calibration_npy,
     read_ax_run_model_output,
     read_pulsar2_run_output,
     read_raw_float32,
+    validate_calibration_archive,
     write_ax_run_model_input,
     write_pulsar2_run_input,
     write_raw_float32,
@@ -79,6 +81,38 @@ class IOFormatTest(unittest.TestCase):
         with tarfile.open(tar_path, "r:gz") as tar:
             names = sorted(tar.getnames())
         self.assertEqual(names, ["0000.npy", "0001.npy", "0002.npy"])
+
+    def _make_archive(self, shapes, name="input.tar.gz"):
+        npy_dir = self.dir / "npy_src"; npy_dir.mkdir(exist_ok=True)
+        for i, s in enumerate(shapes):
+            np.save(npy_dir / f"{i:04d}.npy", np.random.rand(*s).astype(np.float32))
+        tar_path = self.dir / name
+        with tarfile.open(tar_path, "w:gz") as tar:
+            for f in sorted(npy_dir.glob("*.npy")):
+                tar.add(f, arcname=f.name)
+        return tar_path
+
+    def test_calibration_archive_validation_ok(self):
+        tar_path = self._make_archive([(1, 3, 4)] * 4)
+        res = validate_calibration_archive(tar_path, "input", [1, 3, 4], min_samples=4)
+        self.assertEqual(res["samples"], 4)
+        self.assertEqual(res["errors"], [])
+
+    def test_calibration_archive_validation_shape_mismatch(self):
+        tar_path = self._make_archive([(1, 3, 4), (1, 2, 4)])
+        res = validate_calibration_archive(tar_path, "input", [1, 3, 4])
+        self.assertTrue(any("shape 不符" in e for e in res["errors"]))
+        with self.assertRaises(RuntimeError):
+            assert_calibration_archive_ok(tar_path, "input", [1, 3, 4])
+
+    def test_calibration_archive_validation_too_few(self):
+        tar_path = self._make_archive([(1, 3, 4)] * 2)
+        res = validate_calibration_archive(tar_path, "input", [1, 3, 4], min_samples=4)
+        self.assertTrue(any("样本数 2 < 要求 4" in e for e in res["errors"]))
+
+    def test_calibration_archive_missing_file(self):
+        res = validate_calibration_archive(self.dir / "nope.tar.gz", "input", [1, 3, 4])
+        self.assertTrue(any("不存在" in e for e in res["errors"]))
 
 
 if __name__ == "__main__":

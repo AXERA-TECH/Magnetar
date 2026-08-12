@@ -34,10 +34,11 @@ def scp_to(board: dict, src: str | Path, dst: str):
     if Path(src).is_dir(): a.append("-r")
     _r(a + [str(src), f"{board['user']}@{board['host']}:{dst}"], timeout=240)
 
-def scp_from(board: dict, src: str, dst: str | Path):
+def scp_from(board: dict, src: str, dst: str | Path, recursive: bool = False):
     from magnetar.docker_util import run as _r
     a = _scp_base(board)
-    if src.endswith("include"): a.append("-r")
+    if recursive or src.endswith("include"):
+        a.append("-r")
     _r(a + [f"{board['user']}@{board['host']}:{src}", str(dst)], timeout=240)
 
 def select_board(target_hw: str, pwd: str = "123456") -> dict | None:
@@ -124,6 +125,124 @@ def ensure_remote_infer(board: dict, cache_dir: str | Path | None = None) -> dic
     if not port_open(host, REMOTE_INFER_PORT, timeout=5.0):
         raise RuntimeError(f"ax_remote_infer 安装后 {host}:18500 仍不通，请手动检查板子（日志: {log}）")
     return {"status": "installed", "host": host, "installed": True}
+
+
+_PROBE_SCRIPT = r"""
+set +e
+echo '## chip'
+cat /proc/ax_proc/chip_type 2>/dev/null || hostname
+echo '## ax_run_model'
+command -v ax_run_model
+for p in /opt/bin/ax_run_model /usr/bin/ax_run_model; do [ -x "$p" ] && echo "$p"; done
+echo '## python'
+python3 --version 2>&1
+echo '## pyaxengine'
+python3 -c "import axengine as a; print('ok', getattr(a, '__version__', ''))" 2>&1
+echo '## libax_engine'
+ldconfig -p 2>/dev/null | grep -i ax_engine
+for p in /usr/local/lib/libax_engine.so* /soc/lib/libax_engine.so* /opt/lib/libax_engine.so*; do
+  [ -e "$p" ] && echo "$p"
+done
+echo '## ld_path'
+echo "$LD_LIBRARY_PATH"
+"""
+
+
+def probe_board_env(board: dict, timeout: int = 120) -> dict:
+    """SSH 探测板端推理环境，返回结构化 dict（缺什么一目了然）。
+
+    Returns:
+        chip_type / ax_run_model（首个可用路径或 None）/ ax_run_model_paths /
+        python_version / pyaxengine（版本或 None）/ pyaxengine_error /
+        libax_engine（路径列表）/ ld_library_path（板端原始 LD_LIBRARY_PATH）
+    """
+    out = ssh(board, _PROBE_SCRIPT, timeout=timeout, max_tail=300)
+    env = parse_board_probe(out)
+    env["host"] = board["host"]
+    return env
+
+
+def parse_board_probe(out: str) -> dict:
+    """解析 probe_board_env 的 SSH 输出（纯函数，便于单测）。"""
+    result: dict = {
+        "chip_type": "",
+        "ax_run_model": None,
+        "ax_run_model_paths": [],
+        "python_version": "",
+        "pyaxengine": None,
+        "pyaxengine_error": "",
+        "libax_engine": [],
+        "ld_library_path": "",
+    }
+    section = None
+    for line in out.splitlines():
+        line = line.strip()
+        if line.startswith("## "):
+            section = line[3:].strip()
+            continue
+        if not line:
+            continue
+        if section == "chip":
+            if not result["chip_type"]:
+                result["chip_type"] = line
+        elif section == "ax_run_model":
+            if line.startswith("/") and line not in result["ax_run_model_paths"]:
+                result["ax_run_model_paths"].append(line)
+        elif section == "python":
+            if not result["python_version"]:
+                result["python_version"] = line
+        elif section == "pyaxengine":
+            if line.startswith("ok"):
+                result["pyaxengine"] = line[3:].strip() or "unknown"
+            elif not result["pyaxengine_error"]:
+                result["pyaxengine_error"] = line
+        elif section == "libax_engine":
+            path = line
+            if "=>" in line:
+                path = line.split("=>", 1)[1].strip()
+            if path.startswith("/") and path not in result["libax_engine"]:
+                result["libax_engine"].append(path)
+        elif section == "ld_path":
+            result["ld_library_path"] = line
+    if result["ax_run_model_paths"]:
+        result["ax_run_model"] = result["ax_run_model_paths"][0]
+    return result
+
+
+def suggest_ld_library_path(env: dict) -> str:
+    """由探测结果推导板端 LD_LIBRARY_PATH（先探测到的 .so 目录，再补常用目录）。"""
+    dirs: list[str] = []
+    for p in env.get("libax_engine", []):
+        parent = str(Path(p).parent)
+        if parent not in dirs:
+            dirs.append(parent)
+    for extra in ("/soc/lib", "/usr/local/lib", "/opt/lib"):
+        if extra not in dirs:
+            dirs.append(extra)
+    orig = str(env.get("ld_library_path", "")).strip()
+    if orig and orig not in dirs:
+        dirs.append(orig)
+    return ":".join(dirs)
+
+
+def require_board_runtime(board: dict, env: dict, need_pyaxengine: bool = True) -> None:
+    """板端运行依赖硬检查：缺 ax_run_model / pyaxengine 时报可执行提示。"""
+    missing = []
+    if not env.get("ax_run_model"):
+        missing.append(
+            "ax_run_model 未找到（期望 /opt/bin/ax_run_model 或 PATH 中）——"
+            "请安装 axengine 板端运行包"
+        )
+    if need_pyaxengine and not env.get("pyaxengine"):
+        missing.append(
+            "python3 无法 import axengine（pyaxengine 未安装）——"
+            f"请先在板端执行: pip3 install pyaxengine"
+            f"（探测详情: {env.get('pyaxengine_error', '')}）"
+        )
+    if missing:
+        raise RuntimeError(
+            f"板端 {env.get('host', board.get('host'))} 运行环境缺失: " + "; ".join(missing)
+        )
 
 
 def _is_valid_zip(path: Path) -> bool:
