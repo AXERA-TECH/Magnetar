@@ -10,7 +10,13 @@
   `~/.cache/magnetar/pulsar2/<版本>/`，无包才回退 Docker 镜像）+ 准备芯片
   C++ BSP/交叉编译器；Pulsar2 / BSP 下载 ModelScope 优先
   （`AXERA-TECH/Pulsar2`、`AXERA-TECH/AX650-Community-Hub` 均有），无才回退 hf-mirror
+- BSP 公共目录：`magnetar.bsp_util.ensure_bsp(target_hw, cfg)` 自动下载/解压
+  BSP 到 `MAGNETAR_BSP_HOME`（默认 `~/.cache/magnetar/bsp`），探测
+  `AX_RUNTIME_ROOT`（include/ax_engine_api.h + lib/libax_engine.*）与
+  aarch64 交叉编译器，路径固化进 TASK_DIR/config.json
+  （`BSP_ROOT` / `AX_RUNTIME_ROOT` / `CXX_TOOLCHAIN`）；AX620E 需
+  `CXX_BSP_URL` 或本地缓存，否则 C++ 编译降级
 - LLM 分支：额外确认 `pulsar2 llm_build2 -h` 可用（Pulsar2 ≥ 6.0，不可用则
   blocked/提示升级镜像）；准备 ax-llm-build 工具（`ensure_axllm_build_tools`，
   默认经 GH_PROXY 克隆 `https://github.com/AXERA-TECH/ax-llm-build.git` 到 cache/）
-- 后置：`pulsar2_available` gate → COMPILE
+- 后置：`pulsar2_available` gate → COMPILE（BSP 缺失仅降级 C++，不阻塞）

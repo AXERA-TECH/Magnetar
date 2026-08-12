@@ -15,8 +15,6 @@
 - Pulsar2 文档: https://pulsar2-docs.readthedocs.io/zh-cn/latest/
 - 爱芯 HF: https://hf-mirror.com/AXERA-TECH
 - 爱芯 GitHub: https://github.com/AXERA-TECH
-- AX650 BSP SDK (ModelScope): https://modelscope.cn/models/AXERA-TECH/AX650-Community-Hub
-- AX650 BSP SDK: https://hf-mirror.com/AXERA-TECH/AX650-Community-Hub
 - 交叉编译器: https://github.com/AXERA-TECH/ax-samples/tree/main/docs
 - 获取BSP: https://github.com/AXERA-TECH/ax-pipeline/blob/main/scripts/build_common.sh
 - LLM 编译: https://github.com/AXERA-TECH/ax-llm
@@ -47,6 +45,20 @@
 
 - 校准数据 / pulsar2 run / ax_run_model / axengine 输入格式的成功案例固化：`docs/input-format-cheatsheet.md`
 - 代码层单一来源：`magnetar/io_format.py`；`python magnetar/pulsar2_ref.py --cases` 打印成功案例
+
+## QAT（量化感知训练）
+
+INT8 / U16 / 混合精度（layer_configs、SmoothQuant、Brecq、Percentile 等）全部尝试
+仍 cosine < 0.99 时，SIMULATE 到达 STOP 点，先向用户提议上 QAT。QAT 需要训练数据
+和训练时间，成本高，必须用户确认后才进入。
+
+- 框架必须使用官方 `AXERA-TECH/QAT.axera`，不得改用其他 QAT 实现
+  （保证与 Pulsar2 编译链路兼容）
+- 优先 QAT→QDQ ONNX 通道：Pulsar2 的 PTQ 会重新计算 scale，把 QAT 训练收益归零
+  （见 `issues/piper_tts_experience.md` §2）
+- QAT.axera 基础 fake-quant 链路可用，但训练稳定性需先做 toy sanity
+  （见 `issues/melotts_pipeline_issues.md` QAT 追加记录）
+- 用户确认后进入 QAT，通常退回 EXPORT 重新导出 QDQ ONNX
 
 ## 本机环境
 

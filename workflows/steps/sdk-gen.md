@@ -8,6 +8,9 @@
 - on_failure: fail
 - 要点：Python SDK 默认 `AxEngineExecutionProvider`；C++ SDK cmake configure 通过；
   通用版基于 model_meta + model_flow 生成
+- C++ 编译：`magnetar.bsp_util.build_cpp_sdk(task_dir, cfg)` 自动用公共 BSP 的
+  AX_RUNTIME_ROOT + aarch64 交叉编译器交叉编译（产物 sdk/cpp/build-aarch64/）；
+  BSP/编译器未就绪时 C++ 降级（CMake 仍可配置），不阻塞交付
 - LLM 分支：Python SDK = OpenAI 兼容 HTTP 客户端（`requests`，包依赖仅 requests，
   不含 pyaxengine/onnxruntime/torch/transformers），默认指向板端
   `http://<board>:8000/v1`，调用方式对齐原模型 chat 模板（model_flow.json 的

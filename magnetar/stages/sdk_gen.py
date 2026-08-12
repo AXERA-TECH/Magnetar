@@ -71,10 +71,11 @@ def run_mobilenet_cpp(task_dir: Path, target_hw: str) -> None:
         set(CMAKE_CXX_STANDARD 14)
         include_directories(include ${AX_RUNTIME_ROOT}/include)
         link_directories(${AX_RUNTIME_ROOT}/lib)
-        add_library(mobilenet_sdk STATIC src/mobilenet_runner.cpp)
-        target_link_libraries(mobilenet_sdk ax_engine ax_sys pthread dl atomic)
+add_library(mobilenet_sdk STATIC src/mobilenet_runner.cpp)
+        target_link_libraries(mobilenet_sdk ax_engine ax_interpreter ax_sys pthread dl atomic)
         add_executable(mobilenet_example examples/main.cpp)
         target_link_libraries(mobilenet_example mobilenet_sdk)
+        target_link_options(mobilenet_example PRIVATE -Wl,-rpath-link,${AX_RUNTIME_ROOT}/lib)
     """), encoding="utf-8")
     (cpp / "include" / "mobilenet_runner.hpp").write_text(textwrap.dedent("""\
         #pragma once
@@ -417,8 +418,9 @@ target_include_directories({project} PUBLIC include)
 add_executable(model_example examples/main.cpp)
 if(AX_RUNTIME_ROOT)
   target_include_directories({project} PRIVATE ${{AX_RUNTIME_ROOT}}/include)
-  target_link_directories({project} PRIVATE ${{AX_RUNTIME_ROOT}}/lib)
-  target_link_libraries({project} PRIVATE ax_engine ax_sys)
+  target_link_directories(model_example PRIVATE ${{AX_RUNTIME_ROOT}}/lib)
+  target_link_options(model_example PRIVATE -Wl,-rpath-link,${{AX_RUNTIME_ROOT}}/lib)
+  target_link_libraries(model_example PRIVATE ax_engine ax_interpreter ax_sys pthread dl atomic)
 endif()
 target_link_libraries(model_example PRIVATE {project})
 """
@@ -473,9 +475,10 @@ std::vector<char> read_binary(const std::string& path) {
     if (!file) {
         throw std::runtime_error("failed to open " + path);
     }
-    return std::vector<char>(
+    // 花括号初始化，避免 most vexing parse（GCC 9.2 交叉编译报错）
+    return std::vector<char>{
         std::istreambuf_iterator<char>(file),
-        std::istreambuf_iterator<char>());
+        std::istreambuf_iterator<char>()};
 }
 
 void check_ax(int ret, const char* message) {
@@ -590,7 +593,8 @@ std::vector<std::vector<float>> ModelRunner::Run(const std::vector<std::vector<f
         }
         std::memcpy(impl_->inputs[i].pVirAddr, inputs[i].data(), inputs[i].size() * sizeof(float));
     }
-    check_ax(AX_ENGINE_Run(impl_->context, &impl_->io), "AX_ENGINE_Run failed");
+    check_ax(AX_ENGINE_RunSyncV2(impl_->handle, impl_->context, &impl_->io),
+             "AX_ENGINE_RunSyncV2 failed");
 
     std::vector<std::vector<float>> outputs(NumOutputs());
     for (size_t i = 0; i < outputs.size(); ++i) {
@@ -609,6 +613,7 @@ _CPP_EXAMPLE = """\
 #include <cstring>
 #include <fstream>
 #include <iterator>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -619,9 +624,10 @@ std::vector<float> read_float_file(const std::string& path) {
     if (!file) {
         throw std::runtime_error("failed to open " + path);
     }
-    std::vector<char> bytes(
+    // 用花括号初始化避免 most vexing parse（否则会被当成函数声明）
+    std::vector<char> bytes{
         std::istreambuf_iterator<char>(file),
-        std::istreambuf_iterator<char>());
+        std::istreambuf_iterator<char>()};
     std::vector<float> data(bytes.size() / sizeof(float));
     std::memcpy(data.data(), bytes.data(), bytes.size());
     return data;

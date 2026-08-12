@@ -59,6 +59,16 @@ PULSAR2_HOME=
 # 留空默认 ~/.cache/magnetar/base-venv；任务薄 venv 经 .pth 链接复用
 # MAGNETAR_BASE_VENV=
 
+# BSP 公共目录（AX650 BSP SDK 自动下载到这里，含 include/lib + 交叉编译器）。
+# 留空默认 ~/.cache/magnetar/bsp
+# MAGNETAR_BSP_HOME=
+
+# BSP 下载地址（AX650 默认 ModelScope AX650-Community-Hub；AX620E 必须显式给）
+# CXX_BSP_URL=
+
+# aarch64 交叉编译器下载地址（AX650 默认 Arm GNU 9.2 官方地址）
+# CXX_TOOLCHAIN_URL=
+
 # ===== LLM / 自回归模型（ax-llm 路由，可选）=====
 # 模型被判定为自回归/类 LLM 时自动走 ax-llm 路径（pulsar2 llm_build2 + axllm），
 # 以下参数仅在需要覆盖默认值时设置：

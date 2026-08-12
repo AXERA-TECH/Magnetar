@@ -123,11 +123,8 @@ Pulsar2 用 `(img - mean) / std`，libdet 用 `(input - mean) * std`。必须反
 真实数据入口：`run_generic(calibration_data=...)` 或 `scripts/export_onnx.py --calib-dir`。
 
 INT8 / U16 / 混合精度（layer_configs、SmoothQuant、Brecq、Percentile 等）全部尝试仍 cosine < 0.99 时，
-STOP 前先向用户提议上 QAT（量化感知训练）：
-- QAT 框架必须使用官方 `AXERA-TECH/QAT.axera`，不得改用其他 QAT 实现（保证与 Pulsar2 编译链路兼容）
-- 优先 QAT→QDQ ONNX 通道：Pulsar2 的 PTQ 会重新计算 scale，把 QAT 训练收益归零（见 `issues/piper_tts_experience.md` §2）
-- QAT.axera 基础 fake-quant 链路可用，但训练稳定性需先做 toy sanity（见 `issues/melotts_pipeline_issues.md` QAT 追加记录）
-- QAT 需要训练数据和训练时间，成本高；用户确认后才进入，通常退回 EXPORT 重新导出 QDQ ONNX
+STOP 前先向用户提议上 QAT（量化感知训练）；QAT 的框架选型/实现通道/注意事项见
+`docs/ax-knowledge.md` §QAT（官方 QAT.axera、QAT→QDQ 通道、toy sanity、成本与进入条件）。
 
 ### 环境复用（避免重复装大包）
 - 大包只装一次：`python -m magnetar.env_util base`（默认 `~/.cache/magnetar/base-venv`，
@@ -136,6 +133,11 @@ STOP 前先向用户提议上 QAT（量化感知训练）：
   （.pth 链接 base，任务本地包优先），路径固化到 TASK_DIR/config.json 的 VENV_PATH；
   禁止每个模型重建完整 torch/transformers 大环境
 - 后续阶段解释器统一取 `magnetar.env_util.resolve_task_python(task_dir)`
+- BSP/交叉工具链也走公共目录：`magnetar.bsp_util.ensure_bsp(target_hw, cfg)` 自动
+  下载/解压 AX650 BSP SDK 到 `MAGNETAR_BSP_HOME`（默认 `~/.cache/magnetar/bsp`，
+  AX650 默认 ModelScope `AX650-Community-Hub` V3.10.2，`CXX_BSP_URL` 可覆盖），
+  探测 `AX_RUNTIME_ROOT` 与 aarch64 交叉编译器；C++ SDK 编译一律
+  `magnetar.bsp_util.build_cpp_sdk(task_dir, cfg)`，禁止再手动找 ax_engine 头文件/库
 
 ### 编译
 ONNX 必须静态 shape。编译前用 ONNX Runtime 验证。
