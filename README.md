@@ -59,6 +59,19 @@ PACKAGE 完成后进入 PUBLISH 阶段：Agent 会问你**发布到哪（GitHub/
 
 `.magnetarrc` 中设 `MODE=dry-run`，只扫描不下载不编译。
 
+## Token 用量与费用实测（2026-08-12）
+
+从原始来源完整跑通两个模型的实测账本（deepseek-v4-flash，未上板）：
+
+| 模型 | 路径 | 时长 | 输入 tokens | 缓存命中 | 输出 tokens | 估算费用 |
+|------|------|------|-------------|-----------|-------------|----------|
+| yolov8n | 通用（ONNX → INT8 → 仿真）| ~14 min | 6,865,861 | 98.8% | 50,209 | ≈ ¥0.32 |
+| Qwen3-0.6B | ax-llm（llm_build2 s8/bf16）| ~5.1 h | 27,148,037 | 99.5% | 99,429 | ≈ ¥0.87 |
+
+结论：单次转换的 token 费用很低（缓存命中率 98%+），LLM 路径的真实瓶颈是
+墙钟时间（无板时 llm_build2 校验占大头）。完整的分阶段明细、本机配置、费用口径
+与复算方法见 [docs/token-cost-benchmark.md](docs/token-cost-benchmark.md)。
+
 ## 配置 (.magnetarrc)
 
 ```bash
