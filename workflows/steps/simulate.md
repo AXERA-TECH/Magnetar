@@ -8,6 +8,9 @@
 - on_failure: rollback → COMPILE（调整量化配置）
 - 要点：有板必上板（ax_run_model 秒级，先 `ensure_remote_infer`），无板才 pulsar2 run；
   输入/输出格式用 `magnetar/io_format.py`；精度不达标先查 `issues/`
+- 板端并发安全：上板前自动申请独占租约（`board_util.acquire_board_lease`，原子
+  mkdir 抢锁，mtime 心跳 30 分钟）；板子被占用时 SIMULATE 自动回退 pulsar2 run，
+  所有临时文件只在 `/tmp/magnetar-lease/<token>/` 命名空间下，绝不清理他人环境
 - LLM 分支：有板 → 装 axllm（`magnetar.stages.llm.install_axllm`）+ `axllm serve
   compile/llm_model_dir`，OpenAI 兼容接口 ≥3 组 prompt greedy 语义验证
   （`validate_chat`，记录响应非空/token 数/耗时）；无板 → 回退

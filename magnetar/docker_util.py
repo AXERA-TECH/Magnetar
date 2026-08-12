@@ -34,7 +34,9 @@ def _tail(text: str, lines: int | None, chars: int | None = None) -> str:
     return text
 
 def run(cmd, cwd=None, timeout=600, max_tail=None, log_file=None):
-    proc = subprocess.run(cmd, cwd=cwd, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=timeout)
+    proc = subprocess.run(cmd, cwd=cwd, text=True, stdout=subprocess.PIPE,
+                          stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                          timeout=timeout)
     if log_file:
         p = Path(log_file)
         p.parent.mkdir(parents=True, exist_ok=True)
@@ -187,7 +189,7 @@ def run_pulsar2(handle: str, workspace: str, command: str, timeout=1800,
             [*_package_python_cmd(home), str(main), *parts[i:]],
             cwd=workspace, text=True,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            env=env, timeout=timeout,
+            stdin=subprocess.DEVNULL, env=env, timeout=timeout,
         )
         if log_file:
             Path(log_file).parent.mkdir(parents=True, exist_ok=True)
@@ -294,7 +296,7 @@ def _package_config_check(home: Path, workspace: str, config_rel: str,
         [*_package_python_cmd(home), str(script_path), str(Path(workspace) / config_rel)],
         cwd=workspace, text=True,
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-        env=package_env(home), timeout=timeout,
+        stdin=subprocess.DEVNULL, env=package_env(home), timeout=timeout,
     )
     out = _tail(proc.stdout, 80, chars=4000)
     if proc.returncode != 0:

@@ -67,7 +67,8 @@ def _run_on_board(task_dir: Path, sample: np.ndarray, onnx_out: np.ndarray,
                   board: dict, output_name: str, input_name: str) -> dict:
     """板端 ax_run_model 快速通道。"""
     from magnetar.board_util import (
-        ensure_remote_infer, probe_board_env, require_board_runtime,
+        acquire_board_lease, board_workdir, ensure_remote_infer,
+        probe_board_env, release_board_lease, require_board_runtime,
         ssh, scp_to, scp_from,
     )
     from magnetar.io_format import read_ax_run_model_output, write_ax_run_model_input
@@ -93,37 +94,42 @@ def _run_on_board(task_dir: Path, sample: np.ndarray, onnx_out: np.ndarray,
         print(f"[SIMULATE] board env probe failed: {e}, fallback /opt/bin/ax_run_model")
         ax_run_model = "/opt/bin/ax_run_model"
 
-    remote = f"/tmp/magnetar_sim_{os.getpid()}"
-    ssh(board, f"rm -rf {remote} && mkdir -p {remote}/input {remote}/output")
+    # 板端独占租约：防多人/多任务抢占；所有临时文件都在租约命名空间下
+    lease = acquire_board_lease(board, note=f"simulate {task_dir.name}")
+    try:
+        remote = board_workdir(lease, "work")
+        ssh(board, f"mkdir -p {remote}/input {remote}/output")
 
-    # 上传模型和输入
-    axmodel = task_dir / "compile" / "model.axmodel"
-    scp_to(board, axmodel, f"{remote}/model.axmodel")
+        # 上传模型和输入
+        axmodel = task_dir / "compile" / "model.axmodel"
+        scp_to(board, axmodel, f"{remote}/model.axmodel")
 
-    input_dir = sd / "board_input"
-    input_dir.mkdir(exist_ok=True)
-    write_ax_run_model_input(input_dir, input_name, sample)
-    scp_to(board, input_dir, f"{remote}/input_dir")
+        input_dir = sd / "board_input"
+        input_dir.mkdir(exist_ok=True)
+        write_ax_run_model_input(input_dir, input_name, sample)
+        scp_to(board, input_dir, f"{remote}/input_dir")
 
-    # 运行 ax_run_model
-    ssh(board,
-        f"cd {remote} && "
-        f"{ax_run_model} -m model.axmodel "
-        f"-i input_dir -o output -l input_dir/input_list.txt -w 0 -r 1",
-        timeout=120)
+        # 运行 ax_run_model
+        ssh(board,
+            f"cd {remote} && "
+            f"{ax_run_model} -m model.axmodel "
+            f"-i input_dir -o output -l input_dir/input_list.txt -w 0 -r 1",
+            timeout=120)
 
-    # 下载结果
-    scp_from(board, f"{remote}/output", sd / "board_output", recursive=True)
+        # 下载结果
+        scp_from(board, f"{remote}/output", sd / "board_output", recursive=True)
 
-    # 读取 ax_run_model 输出
-    output_dir = sd / "board_output"
-    ax_out = read_ax_run_model_output(output_dir, onnx_out.shape)
+        # 读取 ax_run_model 输出
+        output_dir = sd / "board_output"
+        ax_out = read_ax_run_model_output(output_dir, onnx_out.shape)
 
-    return {
-        "cosine_similarity": cosine(onnx_out, ax_out),
-        "mae": float(np.mean(np.abs(onnx_out - ax_out))),
-        "max_abs_diff": float(np.max(np.abs(onnx_out - ax_out))),
-    }
+        return {
+            "cosine_similarity": cosine(onnx_out, ax_out),
+            "mae": float(np.mean(np.abs(onnx_out - ax_out))),
+            "max_abs_diff": float(np.max(np.abs(onnx_out - ax_out))),
+        }
+    finally:
+        release_board_lease(lease)
 
 
 def _run_pulsar2(task_dir: Path, sample: np.ndarray, onnx_out: np.ndarray,

@@ -2,25 +2,48 @@
 
 上板前用 ensure_remote_infer() 确保 ax_remote_infer daemon 已装并监听 18500，
 装好后即可通过扫描 18500 端口发现板子（select_board 在 dashboard 不可用时回退端口扫描）。
+
+board_lease(): 板端独占租约——多任务/多人共用一块板时，用原子 mkdir 抢锁；
+租约目录 mtime 作心跳（超过 TTL 未续租自动视为过期），清理只删自己的 token
+目录，杜绝误清别人环境。上板临时文件一律放进租约命名空间下。
 """
-import json, os, subprocess, urllib.parse, urllib.request
+import json, os, re, subprocess, urllib.parse, urllib.request
+from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 
 from magnetar.net_util import gh_proxy_url
 
 DASHBOARD = os.environ.get("MAGNETAR_BOARD_DASHBOARD", "http://10.126.35.22:25000/api/devices")
 REMOTE_INFER_PORT = 18500
+BOARD_LEASE_ROOT = "/tmp/magnetar-lease"
+DEFAULT_LEASE_TTL = 1800  # 30 分钟；超时未续租的租约会被其他任务安全清理
 AX_REMOTE_INFER_URL = (
     "https://github.com/AXERA-TECH/ax-remote-infer/releases/download/"
     "latest/ax-remote-infer-latest.zip"
 )
 
-def _ssh_base(b): return ["sshpass", "-p", b["password"], "ssh", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-o", "ConnectTimeout=10", "-p", str(b["port"]), f"{b['user']}@{b['host']}"]
+
+class BoardBusyError(RuntimeError):
+    """板子已被其他任务/用户占用。"""
+
+
+@dataclass
+class BoardLease:
+    board: dict
+    token: str
+    dir: str
+    work_root: str
+    owner: str
+    ttl: int
+
+def _ssh_base(b): return ["sshpass", "-p", b["password"], "ssh", "-n", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-o", "LogLevel=ERROR", "-o", "ConnectTimeout=10", "-p", str(b["port"]), f"{b['user']}@{b['host']}"]
 def _scp_base(b): return ["sshpass", "-p", b["password"], "scp", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-P", str(b["port"])]
 
 def ssh(board: dict, cmd: str, timeout=120, max_tail=None) -> str:
     """远程执行命令；max_tail 指定时只返回尾部（大输出建议用，完整输出不回上下文）。"""
-    proc = subprocess.run(_ssh_base(board) + [cmd], text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=timeout)
+    proc = subprocess.run(_ssh_base(board) + [cmd], text=True, stdout=subprocess.PIPE,
+                          stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, timeout=timeout)
     if proc.returncode != 0:
         detail = "\n".join(proc.stdout.splitlines()[- (max_tail or 300):])
         raise RuntimeError(f"Remote failed (exit {proc.returncode}): {cmd}\n{detail}")
@@ -243,6 +266,147 @@ def require_board_runtime(board: dict, env: dict, need_pyaxengine: bool = True) 
         raise RuntimeError(
             f"板端 {env.get('host', board.get('host'))} 运行环境缺失: " + "; ".join(missing)
         )
+
+
+# ─── 板端独占租约（多人/多任务共用板子时的防抢占、防误清） ───
+
+def _lease_token(owner: str) -> str:
+    """生成板端租约 token：owner-<pid>-<随机>，全程唯一。"""
+    import socket, uuid
+    safe = re.sub(r"[^A-Za-z0-9_.-]", "_", owner)[:40]
+    return f"{safe}-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+
+
+def board_workdir(lease: BoardLease, name: str) -> str:
+    """租约命名空间下的工作目录（所有上板临时文件都放这里）。"""
+    return f"{lease.work_root}/{name}"
+
+
+BOARD_LEASE_LOCK = f"{BOARD_LEASE_ROOT}/lock"
+
+
+def _list_board_leases(board: dict) -> dict[str, dict]:
+    """列出板端租约根目录下所有 token 及 lease.json 信息。"""
+    out = ssh(board, (
+        f"mkdir -p {BOARD_LEASE_ROOT}; "
+        f"for d in {BOARD_LEASE_ROOT}/*/; do "
+        "[ -f \"$d/lease.json\" ] || continue; "
+        "echo \"$(basename \"$d\")\\t$(cat \"$d/lease.json\")\"; done"
+    ), timeout=30, max_tail=400)
+    leases: dict[str, dict] = {}
+    for line in out.splitlines():
+        if "\t" not in line:
+            continue
+        tok, _, info = line.partition("\t")
+        try:
+            leases[tok] = json.loads(info)
+        except Exception:
+            leases[tok] = {}
+    return leases
+
+
+def _cleanup_expired_leases(board: dict, ttl_min: int) -> None:
+    """清理板端过期租约：只删租约根目录下 mtime 超过 TTL 的 token 目录。"""
+    ssh(board, (
+        f"mkdir -p {BOARD_LEASE_ROOT}; "
+        f"find {BOARD_LEASE_ROOT} -mindepth 1 -maxdepth 1 -type d "
+        f"-mmin +{ttl_min} -exec rm -rf {{}} +"
+    ), timeout=60)
+
+
+def _read_lock_info(board: dict) -> dict:
+    """读取当前锁持有者信息（无锁/损坏返回空 dict）。"""
+    out = ssh(board, f"cat {BOARD_LEASE_LOCK}/lease.json 2>/dev/null",
+              timeout=30, max_tail=200)
+    # stderr 可能与输出合并（如首次连接的 host key 提示），只解析 JSON 部分
+    m = re.search(r"\{.*\}", out, re.DOTALL)
+    if not m:
+        return {}
+    try:
+        return json.loads(m.group(0))
+    except Exception:
+        return {}
+
+
+def acquire_board_lease(board: dict, *, owner: str | None = None,
+                        ttl: int = DEFAULT_LEASE_TTL, wait_seconds: int = 0,
+                        note: str = "") -> BoardLease:
+    """申请板端独占租约（固定锁名 ``/tmp/magnetar-lease/lock`` 原子 mkdir 抢锁）。
+
+    - 成功：返回 BoardLease，租约目录 mtime 即心跳；
+    - 被占用：清理过期租约后仍有人占用则抛 BoardBusyError（带占用者信息），
+      不会动任何人的临时文件；
+    - 工作目录命名空间 /tmp/magnetar-lease/<token>/，release 只删自己的 token 目录
+      与仍由自己持有的锁。
+    """
+    import socket, time
+    owner = owner or f"{socket.gethostname()}:{os.getpid()}"
+    token = _lease_token(owner)
+    work_root = f"{BOARD_LEASE_ROOT}/{token}"
+    info = {
+        "token": token, "owner": owner, "host": socket.gethostname(), "pid": os.getpid(),
+        "note": note, "ttl": ttl,
+    }
+    ttl_min = max(1, ttl // 60)
+    deadline = time.time() + max(0, wait_seconds)
+    ssh(board, f"mkdir -p {BOARD_LEASE_ROOT}", timeout=30)
+    while True:
+        try:
+            ssh(board, f"mkdir {BOARD_LEASE_LOCK}", timeout=30)
+            break
+        except RuntimeError:
+            _cleanup_expired_leases(board, ttl_min)
+            lock_info = _read_lock_info(board)
+            if lock_info:
+                if time.time() < deadline:
+                    time.sleep(5)
+                    continue
+                raise BoardBusyError(
+                    f"板子 {board['host']} 正被占用: "
+                    f"{lock_info.get('owner', '?')}（{lock_info.get('note') or '上板任务'}）" +
+                    "。请等对方结束后重试，或用 MAGNETAR_BOARD 指定其他板子"
+                )
+            time.sleep(1)  # 偶发冲突重试
+    ssh(board, (
+        f"mkdir -p {BOARD_LEASE_LOCK}; "
+        f"cat > {BOARD_LEASE_LOCK}/lease.json <<'EOF'\n"
+        f"{json.dumps(info, ensure_ascii=False)}\nEOF"
+    ), timeout=30)
+    return BoardLease(board=board, token=token, dir=BOARD_LEASE_LOCK,
+                      work_root=work_root, owner=owner, ttl=ttl)
+
+
+def renew_board_lease(lease: BoardLease) -> None:
+    """续租：touch 锁目录（更新 mtime 心跳）。"""
+    ssh(lease.board, f"touch {BOARD_LEASE_LOCK}", timeout=30)
+
+
+def release_board_lease(lease: BoardLease) -> None:
+    """释放租约：只删自己的工作目录，以及仍由自己持有的锁。"""
+    try:
+        ssh(lease.board, (
+            f"grep -qF '{lease.token}' {BOARD_LEASE_LOCK}/lease.json 2>/dev/null "
+            f"&& rm -rf {BOARD_LEASE_LOCK}"
+        ), timeout=30)
+    except RuntimeError:
+        pass
+    try:
+        ssh(lease.board, f"rm -rf {lease.work_root}", timeout=30)
+    except RuntimeError:
+        pass
+
+
+@contextmanager
+def board_lease(board: dict, *, owner: str | None = None,
+                ttl: int = DEFAULT_LEASE_TTL, wait_seconds: int = 0,
+                note: str = ""):
+    """板端租约上下文管理器：退出时自动释放（含异常路径）。"""
+    lease = acquire_board_lease(board, owner=owner, ttl=ttl,
+                                wait_seconds=wait_seconds, note=note)
+    try:
+        yield lease
+    finally:
+        release_board_lease(lease)
 
 
 def _is_valid_zip(path: Path) -> bool:
