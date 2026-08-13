@@ -196,6 +196,8 @@ def run(task_dir: Path, target_hw: str, pulsar_image: str,
         input_dtype: str = "FP32", custom_config: dict | None = None,
         skip_validation: bool = False) -> None:
     from magnetar.docker_util import parse_backend, resolve_backend, run_pulsar2
+    from magnetar.errors import MagnetarError
+    from magnetar.stages.events import log_error
 
     compile_dir = task_dir / "compile"
     compile_dir.mkdir(parents=True, exist_ok=True)
@@ -218,7 +220,9 @@ def run(task_dir: Path, target_hw: str, pulsar_image: str,
             for e in errors:
                 print(f"  ❌ {e}")
             print("  💡 修正上述问题后重试；仅排障可用 MAGNETAR_SKIP_PREFLIGHT=1 跳过")
-            raise RuntimeError(f"COMPILE preflight 未通过（{len(errors)} 项错误，见上方列表）")
+            exc = MagnetarError("compile_failed", f"COMPILE preflight 未通过（{len(errors)} 项错误，见上方列表）")
+            log_error(task_dir, exc, stage="COMPILE")
+            raise exc
         if warnings:
             print("[COMPILE] preflight 警告:")
             for w in warnings:
@@ -242,10 +246,13 @@ def run(task_dir: Path, target_hw: str, pulsar_image: str,
             print(f"[COMPILE] {out.strip()}")
         except RuntimeError as e:
             if "CONFIG_ERROR" in str(e):
-                raise RuntimeError(
+                exc = MagnetarError(
+                    "compile_failed",
                     "config-check 未通过（Pulsar2 自身解析报错，见上方输出）。"
-                    "请按报错修正 compile/pulsar2_config.json 后重试"
-                ) from e
+                    "请按报错修正 compile/pulsar2_config.json 后重试",
+                )
+                log_error(task_dir, exc, stage="COMPILE")
+                raise exc from e
             print(f"[COMPILE] 警告: config-check 不可用（{e}），继续编译")
 
     cfg_arg = "/workspace/compile/pulsar2_config.json" if kind == "docker" else str(config_path)
@@ -260,12 +267,14 @@ def run(task_dir: Path, target_hw: str, pulsar_image: str,
     if not axmodel.is_file():
         summary = summarize_compile_log(task_dir)
         from magnetar.stages.state import mark_stage
+        exc = MagnetarError("compile_failed", f"Pulsar2 未生成 {axmodel}")
+        log_error(task_dir, exc, stage="COMPILE")
         mark_stage(
             task_dir, "COMPILE", status="blocked",
             metrics={"compile_errors": summary.get("errors", [])},
             summary=f"COMPILE 失败，见 compile/compile.log 摘要: {summary.get('errors', [])[:2]}",
         )
-        raise RuntimeError(f"Pulsar2 未生成 {axmodel}")
+        raise exc
 
     size_kb = axmodel.stat().st_size / 1024
     (compile_dir / "compile_report.md").write_text(

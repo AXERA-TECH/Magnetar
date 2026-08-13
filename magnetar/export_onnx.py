@@ -24,6 +24,8 @@ from typing import Any, Iterable
 
 import numpy as np
 
+from magnetar.errors import MagnetarError
+
 
 @dataclass
 class ExportAttempt:
@@ -37,11 +39,11 @@ class ExportAttempt:
     error: str = field(default="", repr=False)
 
 
-class ExportError(RuntimeError):
+class ExportError(MagnetarError):
     """所有导出路径都失败。携带 attempts 供 Agent 诊断。"""
 
     def __init__(self, message: str, attempts: list[ExportAttempt], report: Path | None = None):
-        super().__init__(message)
+        super().__init__("export_failed", message)
         self.attempts = attempts
         self.report = report
 

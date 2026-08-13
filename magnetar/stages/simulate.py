@@ -48,7 +48,14 @@ def run(task_dir: Path, sample: np.ndarray, pulsar_image: str,
 
     # 3. 回退 Pulsar2 仿真
     if metrics is None:
-        metrics = _run_pulsar2(task_dir, sample, onnx_out, pulsar_image, sd, input_name, output_name)
+        try:
+            metrics = _run_pulsar2(task_dir, sample, onnx_out, pulsar_image, sd, input_name, output_name)
+        except Exception as e:
+            from magnetar.errors import MagnetarError
+            from magnetar.stages.events import log_error
+            exc = MagnetarError("simulation_transient", f"Pulsar2 仿真失败: {e}")
+            log_error(task_dir, exc, stage="SIMULATE")
+            raise exc from e
 
     from magnetar.stages.state import mark_stage
     mark_stage(

@@ -7,6 +7,8 @@
 
 Agent 的进度判断、断点续跑、阶段汇报都应优先读取本文件，避免全量读 task.md /
 analysis.md / 各阶段报告。所有 stage 函数收尾时自动调用 ``mark_stage``。
+可回放的追加式审计流见 .magnetar-events.jsonl（magnetar/stages/events.py），
+``mark_stage`` 会自动写入 stage / artifact / metric 事件。
 """
 import json
 from datetime import datetime
@@ -45,6 +47,14 @@ def mark_stage(task_dir: Path | str, stage: str, status: str = "done",
     """标记阶段完成并合并产物/指标；summary 只放一句话，详细内容落盘到对应报告。"""
     task_dir = Path(task_dir)
     current = load(task_dir)
+    added_artifacts = {
+        k: v for k, v in (artifacts or {}).items()
+        if k not in current.get("artifacts", {})
+    }
+    added_metrics = {
+        k: v for k, v in (metrics or {}).items()
+        if k not in current.get("metrics", {})
+    }
     updates: dict = {"stage": stage, "status": status}
     if artifacts:
         merged = dict(current.get("artifacts", {}))
@@ -56,4 +66,16 @@ def mark_stage(task_dir: Path | str, stage: str, status: str = "done",
         updates["metrics"] = merged
     if summary:
         updates["summary"] = summary
-    return save(task_dir, **updates)
+    result = save(task_dir, **updates)
+
+    # 事件日志：首次写入时先补 task/start，随后按差异记录 stage / artifact / metric
+    from magnetar.stages.events import EVENT_LOG_NAME, log_event
+    if not (task_dir / EVENT_LOG_NAME).is_file():
+        log_event(task_dir, "task/start", stage=stage)
+    event_type = {"blocked": "stage/blocked", "skipped": "stage/skipped"}.get(status, "stage/done")
+    log_event(task_dir, event_type, stage=stage, status=status, summary=summary)
+    for key, value in added_artifacts.items():
+        log_event(task_dir, "artifact/created", stage=stage, key=key, path=str(value))
+    for key, value in added_metrics.items():
+        log_event(task_dir, "metric/recorded", stage=stage, key=key, value=value)
+    return result

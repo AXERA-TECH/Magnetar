@@ -15,6 +15,8 @@ Agent 负责编排和决策。`magnetar/stages/*.py` 提供确定性执行函数
 | 模块 | 函数 | 用途 |
 |------|------|------|
 | `magnetar.config` | `load_config()` | 读取 `.magnetarrc` + 环境变量 |
+| `magnetar.errors` | `MagnetarError`/`classify_error()` | 类型化错误码注册表（与 `magnetar.yaml` retry_on 对齐，测试强制） |
+| `magnetar.stages.events` | `log_event()`/`log_error()` | 追加式事件日志 `.magnetar-events.jsonl`（可回放审计流，`mark_stage` 自动写） |
 | `magnetar.docker_util` | `latest_pulsar2_image()`, `docker_pulsar2()` | Docker/Pulsar2 封装 |
 | `magnetar.board_util` | `select_board()`, `ssh()`, `scp_to()`, `scp_from()`, `ensure_remote_infer()`, `port_open()` | AX 板端操作（上板前确保 ax-remote-infer 已装，18500 端口可发现板子） |
 | `magnetar.stages.init` | `run(config)` → `task_dir` | 创建 TASK_DIR 结构 |
@@ -82,10 +84,12 @@ BOARD 缺失不是 STOP：SIMULATE 先用 `select_board()` 找空闲板上板，
 TASK_DIR/
   origin/       export/       compile/       simulate/
   sdk/python/   sdk/cpp/      runonboard/    package/    cache/
-  task.md       analysis.md
+  task.md       analysis.md   .magnetar-state.json   .magnetar-events.jsonl
 ```
 
 产物不得污染原始模型工程。
+`mark_stage` 每阶段收尾自动追加 stage/artifact/metric 事件到 `.magnetar-events.jsonl`；
+错误统一抛 `MagnetarError(code)`，新错误码先登记 `magnetar/errors.py` 再进 yaml retry_on。
 
 ## 模型获取
 
