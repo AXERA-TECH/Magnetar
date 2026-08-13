@@ -82,7 +82,7 @@ package/
 `assemble()` 完成后，**必须**调用 `self_test()`：
 
 ```python
-result = magnetar.stages.package.self_test(pkg, model_name)
+result = magnetar.stages.package.self_test(pkg, model_name, task_dir=task_dir)
 ```
 
 `self_test` 会在临时目录中模拟小白用户：
@@ -90,6 +90,10 @@ result = magnetar.stages.package.self_test(pkg, model_name)
 2. 运行 `bash setup.sh`
 3. 运行 `bash run.sh`
 4. 检查是否全部通过
+
+临时目录放 `TASK_DIR/cache/scratch/self_test/`（任务自有）：通过即自动删除；
+失败保留在 `result["scratch_dir"]` 供排查，任务收尾用
+`magnetar.scratch.cleanup_scratch(task_dir)` 清理。禁止往 /tmp 留自测副本。
 
 若 `result["ok"]` 为 False：
 - 根据 `result["errors"]` 修正 README/脚本/setup.sh/run.sh

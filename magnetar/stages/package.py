@@ -6,7 +6,10 @@
 - assemble 完成后自动 self_test——模拟小白只看 README 复现，错则改之
 """
 import json, os, shutil, subprocess, sys, tempfile, textwrap
+from datetime import datetime
 from pathlib import Path
+
+from magnetar.scratch import scratch_dir
 
 
 def assemble(task_dir: Path, metrics: dict, pulsar_image: str,
@@ -110,20 +113,32 @@ def assemble(task_dir: Path, metrics: dict, pulsar_image: str,
     return pkg
 
 
-def self_test(pkg: Path, model_name: str = "model") -> dict:
+def self_test(pkg: Path, model_name: str = "model", *,
+              task_dir: Path | None = None,
+              keep_on_failure: bool = True) -> dict:
     """模拟小白用户只看 README 复现一遍。
 
-    在临时目录中：
+    - ``task_dir`` 指定时自测目录放 ``TASK_DIR/cache/scratch/self_test/``（任务自有，
+      成功即删、失败保留便于排查，收尾用 cleanup_scratch() 清理）；
+    - 未指定时用系统临时目录，并在结束时无条件自动清理（不再留 /tmp 垃圾）。
+    流程：
     1. 跑 setup.sh
     2. 跑 run.sh
-    返回 {"ok": bool, "output": str, "errors": list}
+    返回 {"ok": bool, "output": str, "errors": list[, "scratch_dir": str]}
     """
-    tmp = Path(tempfile.mkdtemp(prefix="magnetar_pkg_test_"))
+    tmp_ctx = None
+    run_dir: Path
+    if task_dir is not None:
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        run_dir = scratch_dir(task_dir, f"self_test/run_{ts}")
+    else:
+        tmp_ctx = tempfile.TemporaryDirectory(prefix="magnetar_pkg_test_")
+        run_dir = Path(tmp_ctx.name)
     results = {"ok": False, "output": "", "errors": []}
     try:
         # 复制包到临时目录
-        shutil.copytree(pkg, tmp / "package", dirs_exist_ok=True)
-        test_dir = tmp / "package"
+        shutil.copytree(pkg, run_dir / "package", dirs_exist_ok=True)
+        test_dir = run_dir / "package"
 
         # Step 1: setup.sh
         setup_script = test_dir / "setup.sh"
@@ -156,8 +171,13 @@ def self_test(pkg: Path, model_name: str = "model") -> dict:
         results["errors"].append(f"self_test 异常: {e}")
         return results
     finally:
-        # 保留临时目录以便排查，但标记为可清理
-        pass
+        if tmp_ctx is not None:
+            tmp_ctx.cleanup()  # 未指定 task_dir 时永远自动清理
+        elif results.get("ok") or not keep_on_failure:
+            shutil.rmtree(run_dir, ignore_errors=True)
+        else:
+            # 任务内自测失败：保留目录便于排查，路径写回结果供 Agent 查看
+            results["scratch_dir"] = str(run_dir)
 
 
 # ---- 内部辅助 ----

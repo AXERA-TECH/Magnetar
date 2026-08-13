@@ -285,7 +285,7 @@ def board_workdir(lease: BoardLease, name: str) -> str:
 BOARD_LEASE_LOCK = f"{BOARD_LEASE_ROOT}/lock"
 
 
-def _list_board_leases(board: dict) -> dict[str, dict]:
+def list_board_leases(board: dict) -> dict[str, dict]:
     """列出板端租约根目录下所有 token 及 lease.json 信息。"""
     out = ssh(board, (
         f"mkdir -p {BOARD_LEASE_ROOT}; "
@@ -305,13 +305,51 @@ def _list_board_leases(board: dict) -> dict[str, dict]:
     return leases
 
 
-def _cleanup_expired_leases(board: dict, ttl_min: int) -> None:
+def cleanup_expired_leases(board: dict, ttl_min: int) -> None:
     """清理板端过期租约：只删租约根目录下 mtime 超过 TTL 的 token 目录。"""
     ssh(board, (
         f"mkdir -p {BOARD_LEASE_ROOT}; "
         f"find {BOARD_LEASE_ROOT} -mindepth 1 -maxdepth 1 -type d "
         f"-mmin +{ttl_min} -exec rm -rf {{}} +"
     ), timeout=60)
+
+
+def board_lease_report(board: dict,
+                       ttl_min: int = DEFAULT_LEASE_TTL // 60) -> list[dict]:
+    """板端租约体检：返回每个 token 的归属与存活状态（只读，不删除）。
+
+    供新任务判断"该不该清"：expired=True 表示 mtime 超过 TTL 的残留，
+    可安全调用 cleanup_expired_leases() 清理；活租约会随心跳保持 mtime 新鲜。
+    """
+    import time
+    leases = list_board_leases(board)
+    out = ssh(board, (
+        f"for d in {BOARD_LEASE_ROOT}/*/; do "
+        "[ -f \"$d/lease.json\" ] || continue; "
+        "echo \"$(basename \"$d\")\\t$(stat -c %Y \"$d\" 2>/dev/null || echo 0)\"; done"
+    ), timeout=30, max_tail=400)
+    mtimes: dict[str, int] = {}
+    for line in out.splitlines():
+        tok, _, m = line.partition("\t")
+        try:
+            mtimes[tok] = int(m)
+        except ValueError:
+            pass
+    now = int(time.time())
+    report: list[dict] = []
+    for tok, info in leases.items():
+        age_min = None
+        if tok in mtimes:
+            age_min = max(0, (now - mtimes[tok]) // 60)
+        report.append({
+            "token": tok,
+            "owner": info.get("owner", "?"),
+            "note": info.get("note", ""),
+            "age_min": age_min,
+            "expired": age_min is not None and age_min > ttl_min,
+        })
+    report.sort(key=lambda d: (d["age_min"] or 0), reverse=True)
+    return report
 
 
 def _read_lock_info(board: dict) -> dict:
@@ -350,12 +388,18 @@ def acquire_board_lease(board: dict, *, owner: str | None = None,
     ttl_min = max(1, ttl // 60)
     deadline = time.time() + max(0, wait_seconds)
     ssh(board, f"mkdir -p {BOARD_LEASE_ROOT}", timeout=30)
+    # 无条件先扫一遍过期租约：新任务到来时崩溃残留自动清掉，活租约不受影响
+    # （mtime 心跳；扫尾失败不阻塞获取，锁冲突路径上还会再扫）
+    try:
+        cleanup_expired_leases(board, ttl_min)
+    except RuntimeError:
+        pass
     while True:
         try:
             ssh(board, f"mkdir {BOARD_LEASE_LOCK}", timeout=30)
             break
         except RuntimeError:
-            _cleanup_expired_leases(board, ttl_min)
+            cleanup_expired_leases(board, ttl_min)
             lock_info = _read_lock_info(board)
             if lock_info:
                 if time.time() < deadline:

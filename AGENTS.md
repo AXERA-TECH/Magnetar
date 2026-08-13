@@ -150,6 +150,16 @@ STOP 前先向用户提议上 QAT（量化感知训练）；QAT 的框架选型/
 ### 编译
 ONNX 必须静态 shape。编译前用 ONNX Runtime 验证。
 
+### 临时文件与残留清理（防 /tmp 塞满）
+- 本机临时目录一律放 `TASK_DIR/cache/scratch/<用途>/`（`magnetar.scratch.scratch_dir`），
+  禁止往 /tmp 散落大文件；任务收尾调 `magnetar.scratch.cleanup_scratch(task_dir)`。
+- `package.self_test(pkg, model_name, task_dir=task_dir)`：自测目录进任务 scratch，
+  通过即删、失败保留在 `result["scratch_dir"]` 供排查。
+- 板端临时文件一律进租约命名空间 `/tmp/magnetar-lease/<token>/`；
+  `acquire_board_lease` 获取前无条件先扫过期租约（mtime 心跳，活租约不受影响）。
+- 新任务开始前执行 `./magnetar cleanup`（只读报告）确认"该不该清"，
+  确认后 `--force` 才删；板端用 `--board root@host[:port]` 查看/清理过期租约。
+
 ### LLM / 自回归模型（ax-llm）
 - 入口：`pulsar2 llm_build2`（Pulsar2 ≥ 6.0，支持 AX650A/N、AX630C，其他芯片以
   `--chip` 支持与 ax-llm 实际验证为准）；产物逐层 axmodel + post axmodel +

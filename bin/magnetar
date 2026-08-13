@@ -26,6 +26,7 @@ magnetar — AI 模型到 AX 芯片一键部署 CLI
   status     查看最近一次任务的状态
   monitor    实时 TUI 监控面板，展示流水线进度和关键指标
   report     生成自包含 HTML 仪表盘报告
+  cleanup    检查/清理历史临时残留与板端过期租约（默认只报告，--force 才删）
   run        输出 Codex 启动提示，开始模型部署
   dry-run    预览模式：扫描模型、输出计划，不执行实际转换
   install    安装 Pulsar2 Docker 编译环境
@@ -259,6 +260,14 @@ cmd_report() {
     echo "可直接用浏览器打开"
 }
 
+cmd_cleanup() {
+    local extra_args=()
+    for arg in "$@"; do
+        extra_args+=("$arg")
+    done
+    python3 "$REPO_ROOT/scripts/cleanup.py" "${extra_args[@]}"
+}
+
 cmd="${1:-help}"
 case "$cmd" in
     init)       cmd_init ;;
@@ -266,6 +275,7 @@ case "$cmd" in
     status)     cmd_status ;;
     monitor)    shift; cmd_monitor "$@" ;;
     report)     shift; cmd_report "$@" ;;
+    cleanup)    shift; cmd_cleanup "$@" ;;
     run)        cmd_run ;;
     dry-run)    cmd_dry_run ;;
     install)    cmd_install ;;

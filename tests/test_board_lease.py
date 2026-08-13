@@ -102,6 +102,39 @@ class BoardLeaseTest(unittest.TestCase):
             info = _read_lock_info(BOARD)
         self.assertEqual(info["owner"], "bob:1")
 
+    def test_list_board_leases_parses_lease_json(self):
+        from magnetar.board_util import list_board_leases
+        out = (
+            "tok-a\t{\"token\": \"tok-a\", \"owner\": \"alice:1\", \"note\": \"simulate\"}\n"
+            "tok-b\t{\"token\": \"tok-b\", \"owner\": \"bob:2\", \"note\": \"runonboard\"}\n"
+        )
+        with mock.patch("magnetar.board_util.ssh", return_value=out):
+            leases = list_board_leases(BOARD)
+        self.assertEqual(set(leases), {"tok-a", "tok-b"})
+        self.assertEqual(leases["tok-a"]["owner"], "alice:1")
+
+    def test_board_lease_report_marks_expired(self):
+        import time
+        from magnetar.board_util import board_lease_report
+        now = int(time.time())
+        lease_out = (
+            "tok-old\t{\"token\": \"tok-old\", \"owner\": \"dead:1\", \"note\": \"crashed\"}\n"
+            "tok-new\t{\"token\": \"tok-new\", \"owner\": \"alive:2\", \"note\": \"running\"}\n"
+        )
+        stat_out = f"tok-old\t{now - 7200}\ntok-new\t{now - 60}\n"
+
+        def fake_ssh(board, cmd, timeout=120, max_tail=None):
+            if "lease.json" in cmd and "stat -c" in cmd:
+                return stat_out
+            return lease_out
+
+        with mock.patch("magnetar.board_util.ssh", side_effect=fake_ssh):
+            report = board_lease_report(BOARD, ttl_min=30)
+        by_token = {i["token"]: i for i in report}
+        self.assertTrue(by_token["tok-old"]["expired"])
+        self.assertFalse(by_token["tok-new"]["expired"])
+        self.assertEqual(by_token["tok-old"]["owner"], "dead:1")
+
 
 if __name__ == "__main__":
     unittest.main()
