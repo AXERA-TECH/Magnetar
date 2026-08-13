@@ -77,7 +77,7 @@ PUBLISH 目标/仓库/凭据。
 
 ## 国内镜像默认
 
-- ModelScope 优先：涉及 HF 的内容（权重 / Pulsar2 / BSP SDK 等）先
+- ModelScope 优先：涉及 HF 的内容（权重 / Pulsar2 等）先
   `magnetar.net_util.modelscope_available("<org>/<name>")` 查 ModelScope，有则走
   ModelScope（`modelscope download` / resolve 直链），无才回退 HF/hf-mirror
 - HF 大文件下载用 hf-mirror 的 hfd：`scripts/download_hf.sh <org>/<name>
@@ -93,7 +93,9 @@ PUBLISH 目标/仓库/凭据。
 - BSP 公共目录：`magnetar.bsp_util.ensure_bsp()` 自动下载/解压 AX650 BSP SDK 到
   `MAGNETAR_BSP_HOME`（默认 `~/.cache/magnetar/bsp`，含交叉编译器），探测
   AX_RUNTIME_ROOT 并固化进 config.json；C++ SDK 用 `build_cpp_sdk()` 一键交叉编译，
-  不再人肉找 ax_engine 头文件/库
+  不再人肉找 ax_engine 头文件/库；SDK/runtime 下载地址按芯片解析自 ax-pipeline
+  `build_common.sh`（`MSP_URL_DEFAULT` / `TOOLCHAIN_URL_DEFAULT`，比 ModelScope
+  全量 SDK 快，`CXX_BSP_URL` 可覆盖）
 - 全部可通过 `.magnetarrc` 或环境变量覆盖（置空即禁用镜像）
 
 ## 常用输入（yaml inputs 段，环境变量可覆盖）

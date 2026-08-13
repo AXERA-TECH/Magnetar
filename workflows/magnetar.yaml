@@ -32,7 +32,7 @@ workflow:
       - onnxruntime for ONNX validation
       - Python SDK with pyaxengine and AxEngineExecutionProvider by default
       - C++ SDK with CMake and direct AX Engine runtime linking
-      - AX650 BSP SDK V3.10.2 (含 aarch64 交叉编译器 + AX runtime) from hf-mirror; AX620E Arm GNU aarch64 toolchain (待更新)
+      - BSP/runtime 与编译器下载地址按芯片来自 ax-pipeline build_common.sh: AX650 (msp_50 + Arm GNU 9.2 aarch64); AX630C / AX620Q（AX620E NPU）(msp_20e + 各自编译器)
       security:
       - do not modify source model repositories
       - do not guess private credentials
@@ -147,7 +147,7 @@ workflow:
     - network
     required: true
   - id: cxx_toolchain
-    purpose: Build and validate C++ SDK with chip-specific BSP (AX650) or Arm GNU toolchain (AX620E)
+    purpose: Build and validate C++ SDK with chip-specific BSP/runtime + compiler from build_common.sh (AX650 / AX630C / AX620Q)
     source: install
     skill_path: .codex/skills/magnetar/hidden/toolchain/SKILL.md
     permissions:
@@ -639,7 +639,7 @@ workflow:
   - id: toolchain
     kind: agent
     skill: .codex/skills/magnetar/hidden/toolchain/SKILL.md
-    description: Verify Pulsar2 and prepare chip-specific C++ BSP/toolchain (AX650 BSP SDK / AX620E Arm GNU); LLM 路由时额外确认 pulsar2 llm_build2 可用（Pulsar2 ≥ 6.0）并准备 ax-llm-build 工具
+    description: Verify Pulsar2 and prepare chip-specific C++ BSP/toolchain (下载地址按芯片解析自 ax-pipeline build_common.sh：AX650 / AX630C / AX620Q)；LLM 路由时额外确认 pulsar2 llm_build2 可用（Pulsar2 ≥ 6.0）并准备 ax-llm-build 工具
     depends_on:
     - stage_review_export
     parallel_group: null

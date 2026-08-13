@@ -97,8 +97,8 @@ PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/      # uv / pip 阿里云 
 涉及范围：模型权重下载、ax-llm / ax-llm-build / pyaxengine 等 GitHub 仓库克隆与安装、
 ax-remote-infer release 下载、uv/pip 包安装、Pulsar2 镜像获取（ModelScope 优先，hf-mirror 回退）。
 
-**ModelScope 优先**：凡是 HuggingFace 上托管的内容（模型权重、Pulsar2、
-AX650-Community-Hub 等），工作流先探测 ModelScope（`modelscope.cn/models/<org>/<name>`）
+**ModelScope 优先**：凡是 HuggingFace 上托管的内容（模型权重、Pulsar2 等），
+工作流先探测 ModelScope（`modelscope.cn/models/<org>/<name>`）
 是否存在，存在则从 ModelScope 下载（国内 CDN 更快），没有才回退 HF/hf-mirror。
 
 HF 大文件（权重等）回退下载用 hf-mirror 的 hfd 工具：
@@ -201,7 +201,7 @@ SDK-GEN 阶段对非 MobileNet 模型优先调用 `magnetar.stages.sdk_gen.run_g
 ## 工具链
 
 - [Pulsar2](https://hf-mirror.com/AXERA-TECH/Pulsar2) · [pyaxengine](https://github.com/AXERA-TECH/pyaxengine) · [libdet.axera](https://github.com/AXERA-TECH/libdet.axera)
-- [AX650 BSP SDK](https://hf-mirror.com/AXERA-TECH/AX650-Community-Hub)
+- [BSP/runtime 下载地址（ax-pipeline build_common.sh）](https://github.com/AXERA-TECH/ax-pipeline/blob/main/scripts/build_common.sh)
 
 ## 常见问题
 

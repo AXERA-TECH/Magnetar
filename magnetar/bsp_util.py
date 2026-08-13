@@ -5,30 +5,44 @@
 
 - BSP 统一放共享目录（``MAGNETAR_BSP_HOME``，默认 ``~/.cache/magnetar/bsp``），
   与 Pulsar2 独立包、base venv 同一套约定，多任务共享、只下载一次；
-- ``ensure_bsp()`` 自动下载（ModelScope 优先）/解压/探测 runtime root 与交叉编译器；
+- SDK/runtime 下载地址以 ax-pipeline ``scripts/build_common.sh`` 为唯一来源
+  （按芯片解析 ``MSP_URL_DEFAULT`` / ``TOOLCHAIN_URL_DEFAULT``；AX650 直接下
+  约 60MB 的 msp zip，不再拉 ModelScope 3.7GB 全量 SDK）；
+- ``ensure_bsp()`` 自动拉取清单/下载/解压/探测 runtime root 与交叉编译器；
 - ``build_cpp_sdk()`` 用探测到的 runtime root + 交叉编译器一键 CMake 编译 C++ SDK。
 
-AX650 BSP SDK（V3.10.2，含 include/lib + Neutron 交叉工具链）：
-ModelScope ``AXERA-TECH/AX650-Community-Hub``（``CXX_BSP_URL`` 可覆盖）。
-AX620E：仅 ``CXX_BSP_URL`` 或本地已有缓存时可用，否则 C++ 编译降级跳过。
+芯片对应（AX620E 是 NPU 名称，对应 SoC 为 AX630C / AX620Q；build_common.sh 的 case 键）：
+- AX650 → ``ax650``：msp_50_3.10.2.zip + Arm GNU 9.2 aarch64 交叉编译器；
+- AX630C → ``ax630c``：msp_20e_3.0.0.zip + Arm GNU 9.2 aarch64 交叉编译器；
+- AX620Q / AX620E → ``ax620q``：msp_20e_3.0.0.zip + ax620q_bsp_sdk uclibc
+  交叉编译器（TARGET_HARDWARE 写 AX620E 时按 AX620Q 处理）。
+
+``CXX_BSP_URL`` / ``CXX_TOOLCHAIN_URL`` 可覆盖下载地址；清单本身可用
+``BUILD_COMMON_SH_URL`` 覆盖并缓存到 ``MAGNETAR_BSP_HOME/cache/``。
 """
 from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
+import tarfile
+import urllib.request
+import zipfile
 from pathlib import Path
 
-from magnetar.net_util import modelscope_url
+from magnetar.net_util import gh_proxy_url
 
-AX650_REPO = "AXERA-TECH/AX650-Community-Hub"
-AX650_SDK_TGZ = "AX650_SDK_V3.10.2_20260513151335.tgz"
-AX650_SDK_SUBDIR = "sdk/edge-computing-AX650_SDK_V3.10.2/02. SDK/AX650_SDK_V3.10.2"
-AX650_SDK_PKG_DIR = "AX650_SDK_V3.10.2_20260513151335"
-ARM_GCC_9_2_URL = ("https://developer.arm.com/-/media/Files/downloads/gnu-a/9.2-2019.12/"
-                   "binrel/gcc-arm-9.2-2019.12-x86_64-aarch64-none-linux-gnu.tar.xz")
+BUILD_COMMON_URL = ("https://raw.githubusercontent.com/AXERA-TECH/ax-pipeline/"
+                    "main/scripts/build_common.sh")
 BSP_INFO_NAME = "bsp_info.json"
+# build_common.sh 中需要解析的字段
+_BC_KEYS = ("MSP_ZIP_NAME", "MSP_URL_DEFAULT",
+            "TOOLCHAIN_ARCHIVE_NAME", "TOOLCHAIN_URL_DEFAULT", "COMPILER_CHECK")
+# Magnetar 目标芯片 → build_common.sh case 键
+CHIP_TO_BC = {"AX650": "ax650", "AX630C": "ax630c",
+              "AX620E": "ax620q", "AX620Q": "ax620q"}
 
 
 def bsp_root(cfg: dict | None = None) -> Path:
@@ -84,11 +98,13 @@ def find_runtime_root(bsp_dir: Path, max_depth: int = 8) -> Path | None:
 
 
 def find_cross_compiler(bsp_dir: Path | None, max_depth: int = 8) -> Path | None:
-    """找 aarch64 交叉编译器：AARCH64_GXX > PATH > BSP 目录内。"""
+    """找交叉编译器：AARCH64_GXX > PATH > BSP 目录内（含 AX620Q uclibc）。"""
     env = os.environ.get("AARCH64_GXX")
     if env and Path(env).is_file():
         return Path(env)
-    for name in ("aarch64-none-linux-gnu-g++", "aarch64-linux-gnu-g++"):
+    candidates = ("aarch64-none-linux-gnu-g++", "aarch64-linux-gnu-g++",
+                  "arm-AX620E-linux-uclibcgnueabihf-g++")
+    for name in candidates:
         p = shutil.which(name)
         if p:
             return Path(p)
@@ -103,8 +119,9 @@ def find_cross_compiler(bsp_dir: Path | None, max_depth: int = 8) -> Path | None
                 if len(rel.parts) > max_depth:
                     dirs[:] = []
                     continue
-                if "aarch64-none-linux-gnu-g++" in files:
-                    return Path(root) / "aarch64-none-linux-gnu-g++"
+                for name in candidates:
+                    if name in files:
+                        return Path(root) / name
     return None
 
 
@@ -126,24 +143,107 @@ def _save_cache(home: Path, info: dict) -> None:
         json.dumps(info, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
+def _fetch_build_common(cfg: dict | None = None) -> str:
+    """拉取 ax-pipeline build_common.sh（本地缓存，删缓存文件即刷新）。"""
+    home = bsp_root(cfg)
+    cache = home / "cache" / "build_common.sh"
+    if cache.is_file() and cache.stat().st_size > 0:
+        return cache.read_text(encoding="utf-8")
+    url = (os.environ.get("BUILD_COMMON_SH_URL")
+           or (cfg or {}).get("BUILD_COMMON_SH_URL") or BUILD_COMMON_URL)
+    url = gh_proxy_url(url, cfg)
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with urllib.request.urlopen(url, timeout=30) as r:
+            text = r.read().decode("utf-8")
+    except Exception as e:
+        raise RuntimeError(f"无法获取 ax-pipeline build_common.sh（{url}）: {e}")
+    cache.write_text(text, encoding="utf-8")
+    return text
+
+
+def _parse_build_common(text: str) -> dict[str, dict[str, str]]:
+    """解析 build_common.sh 的 case 分支，返回 {chip: {field: value}}。"""
+    entries: dict[str, dict[str, str]] = {}
+    chip: str | None = None
+    for line in text.splitlines():
+        m = re.match(r"^  ([a-z0-9_-]+)\)\s*(?:#.*)?$", line)
+        if m:
+            chip = m.group(1)
+            entries.setdefault(chip, {})
+            continue
+        if line.strip() in (";;", "esac"):
+            chip = None
+            continue
+        if chip is None:
+            continue
+        for key in _BC_KEYS:
+            m2 = re.match(rf'^    {re.escape(key)}="([^"]*)"', line)
+            if m2:
+                entries[chip][key] = m2.group(1)
+                break
+    return entries
+
+
+def _chip_entry(chip: str, cfg: dict | None = None) -> dict:
+    """取 build_common.sh 中某芯片的下载信息（已展开 ${...} 变量）。"""
+    text = _fetch_build_common(cfg)
+    entries = _parse_build_common(text)
+    bc_key = CHIP_TO_BC.get((chip or "").upper(), chip)
+    entry = entries.get(bc_key)
+    if not entry:
+        raise RuntimeError(
+            f"build_common.sh 中没有芯片 {chip}（case 键 {bc_key}）的下载地址")
+    return {
+        "msp_zip_name": entry.get("MSP_ZIP_NAME", ""),
+        "msp_url": entry.get("MSP_URL_DEFAULT", ""),
+        "toolchain_url": entry.get("TOOLCHAIN_URL_DEFAULT", "").replace(
+            "${TOOLCHAIN_ARCHIVE_NAME}",
+            entry.get("TOOLCHAIN_ARCHIVE_NAME", "")),
+        "compiler_check": entry.get("COMPILER_CHECK", ""),
+    }
+
+
+def _bsp_url(entry: dict | None, cfg: dict | None = None) -> str:
+    """BSP/runtime 下载地址：CXX_BSP_URL > build_common.sh 默认。"""
+    return (os.environ.get("CXX_BSP_URL") or (cfg or {}).get("CXX_BSP_URL")
+            or (entry or {}).get("msp_url") or "")
+
+
+def _msp_archive(home: Path, entry: dict | None, cfg: dict | None = None) -> Path:
+    """BSP/runtime 压缩包落盘路径：默认 build_common.sh 文件名，CXX_BSP_URL 用 URL 末段。"""
+    url = _bsp_url(entry, cfg)
+    if os.environ.get("CXX_BSP_URL") or (cfg or {}).get("CXX_BSP_URL"):
+        name = url.rsplit("/", 1)[-1] or "msp.zip"
+    else:
+        name = ((entry or {}).get("msp_zip_name")
+                or url.rsplit("/", 1)[-1] or "msp.zip")
+    return home / name
+
+
+def _archive_version(archive: Path) -> str:
+    m = re.search(r"(\d+\.\d+\.\d+)", archive.name)
+    return f"V{m.group(1)}" if m else ""
+
+
 def _ensure_ax650(home: Path, cfg: dict | None, force: bool) -> dict | None:
     home.mkdir(parents=True, exist_ok=True)
     if not force:
         cached = _load_cache(home)
         if cached:
             return cached
-    tgz = home / AX650_SDK_TGZ
-    if not tgz.is_file():
-        url = ((os.environ.get("CXX_BSP_URL") or (cfg or {}).get("CXX_BSP_URL"))
-               or modelscope_url(AX650_REPO, f"{AX650_SDK_SUBDIR}/{AX650_SDK_TGZ}"))
-        print(f"[bsp_util] 下载 AX650 BSP SDK（约 3.7GB，仅一次）: {url}")
-        _download(url, tgz)
-    runtime = _ax650_runtime(home, tgz)
-    _ensure_toolchain(home, cfg)
+    entry = _chip_entry("ax650", cfg)
+    msp_zip = _msp_archive(home, entry, cfg)
+    if not msp_zip.is_file():
+        url = _bsp_url(entry, cfg)
+        print(f"[bsp_util] 下载 AX650 runtime（msp zip，约 60MB，仅一次）: {url}")
+        _download(url, msp_zip)
+    runtime = _extract_bsp_archive(home, msp_zip)
+    _ensure_toolchain(home, cfg, entry)
     gcc = find_cross_compiler(home)
     info = {
         "bsp_dir": str(home),
-        "version": "V3.10.2",
+        "version": _archive_version(msp_zip),
         "runtime_root": str(runtime) if runtime else None,
         "cross_compiler": str(gcc) if gcc else None,
     }
@@ -157,68 +257,96 @@ def _ensure_ax650(home: Path, cfg: dict | None, force: bool) -> dict | None:
     return info
 
 
-def _ax650_runtime(home: Path, tgz: Path) -> Path | None:
-    """解出 AX650 runtime（msp.tgz → msp/out），返回 runtime root。"""
+def _extract_bsp_archive(home: Path, archive: Path) -> Path | None:
+    """解压 BSP/runtime 压缩包（zip/tar/tgz），返回 AX runtime root；无则 None。"""
     out = home / "msp" / "out"
     if (out / "include" / "ax_engine_api.h").is_file():
         return out
-    pkg_msp = home / AX650_SDK_PKG_DIR / "package" / "msp.tgz"
-    if not pkg_msp.is_file():
-        print(f"[bsp_util] 从 BSP SDK 包中提取 msp.tgz")
-        _run(["tar", "-xzf", str(tgz), "-C", str(home),
-              f"{AX650_SDK_PKG_DIR}/package/msp.tgz"], timeout=10800)
-    print(f"[bsp_util] 解压 AX runtime（msp.tgz）")
-    _run(["tar", "-xzf", str(pkg_msp), "-C", str(home)], timeout=1800)
-    if (out / "include" / "ax_engine_api.h").is_file():
-        return out
-    return find_runtime_root(home)
+    if not archive.is_file():
+        return None
+    dest = home
+    if archive.suffix.lower() == ".zip":
+        with zipfile.ZipFile(archive) as z:
+            top = {n.split("/", 1)[0] for n in z.namelist()
+                   if "/" in n or n.endswith("/")}
+        # zip 顶层不是单一 msp/ 目录时，解到独立子目录避免混入 home
+        if top != {"msp"}:
+            dest = home / archive.stem
+            dest.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(archive) as z:
+            z.extractall(dest)
+    else:
+        dest.mkdir(parents=True, exist_ok=True)
+        with tarfile.open(archive) as t:
+            t.extractall(dest)
+    runtime = find_runtime_root(home)
+    if runtime is None and (out / "include" / "ax_engine_api.h").is_file():
+        runtime = out
+    return runtime
 
 
-def _ensure_toolchain(home: Path, cfg: dict | None, force: bool = False) -> None:
-    """确保 aarch64 交叉编译器就绪（Arm GNU 9.2，官方地址，CXX_TOOLCHAIN_URL 可覆盖）。"""
+def _ensure_toolchain(home: Path, cfg: dict | None, entry: dict | None = None,
+                      force: bool = False) -> None:
+    """确保交叉编译器就绪（地址来自 build_common.sh，CXX_TOOLCHAIN_URL 可覆盖）。"""
     if not force and find_cross_compiler(home) is not None:
         return
     url = (os.environ.get("CXX_TOOLCHAIN_URL")
-           or (cfg or {}).get("CXX_TOOLCHAIN_URL") or ARM_GCC_9_2_URL)
+           or (cfg or {}).get("CXX_TOOLCHAIN_URL")
+           or (entry or {}).get("toolchain_url") or "")
+    if not url:
+        print("[bsp_util] 交叉编译器下载地址不可用（未配置 CXX_TOOLCHAIN_URL），"
+              "C++ 编译将降级")
+        return
     tc_dir = home / "toolchain"
     tc_dir.mkdir(parents=True, exist_ok=True)
     tarball = tc_dir / url.rsplit("/", 1)[-1]
     if not tarball.is_file():
-        print(f"[bsp_util] 下载交叉编译器（约 270MB，仅一次）: {url}")
+        print(f"[bsp_util] 下载交叉编译器: {url}")
         _download(url, tarball)
     if find_cross_compiler(home) is None:
-        _run(["tar", "-xJf", str(tarball), "-C", str(tc_dir)], timeout=1800)
+        args = ["tar", "-xzf", str(tarball), "-C", str(tc_dir)]
+        if str(tarball).endswith(".xz"):
+            args = ["tar", "-xJf", str(tarball), "-C", str(tc_dir)]
+        _run(args, timeout=1800)
 
 
-def _ensure_ax620e(home: Path, cfg: dict | None, force: bool) -> dict | None:
+def _ensure_chip(home: Path, bc_key: str, cfg: dict | None,
+                 force: bool) -> dict | None:
+    """AX620E 家族（ax630c / ax620q）：按 build_common.sh 下载 runtime + 编译器。"""
     home.mkdir(parents=True, exist_ok=True)
     if not force:
         cached = _load_cache(home)
         if cached:
             return cached
+    entry = None
+    try:
+        entry = _chip_entry(bc_key, cfg)
+    except RuntimeError as e:
+        print(f"[bsp_util] {e}")
+    url = _bsp_url(entry, cfg)
+    archive = None
+    if url:
+        archive = _msp_archive(home, entry, cfg)
+        if not archive.is_file():
+            print(f"[bsp_util] 下载 {bc_key} runtime: {url}")
+            _download(url, archive)
+        _extract_bsp_archive(home, archive)
+    _ensure_toolchain(home, cfg, entry)
     runtime = find_runtime_root(home)
-    if runtime is None:
-        url = os.environ.get("CXX_BSP_URL") or (cfg or {}).get("CXX_BSP_URL")
-        if url:
-            tgz = home / "bsp.tar.gz"
-            if not tgz.is_file():
-                print(f"[bsp_util] 下载 AX620E BSP: {url}")
-                _download(url, tgz)
-            print(f"[bsp_util] 解压 AX620E BSP: {tgz.name}")
-            _run(["tar", "-xzf", str(tgz), "-C", str(home)], timeout=10800)
-            runtime = find_runtime_root(home)
     gcc = find_cross_compiler(home)
     info = {
         "bsp_dir": str(home),
+        "version": _archive_version(archive) if archive else "",
         "runtime_root": str(runtime) if runtime else None,
         "cross_compiler": str(gcc) if gcc else None,
     }
     _save_cache(home, info)
     if runtime is None:
-        print("[bsp_util] AX620E BSP 不可用（未配置 CXX_BSP_URL 且无本地缓存），"
+        print(f"[bsp_util] {bc_key} BSP 不可用（未配置 CXX_BSP_URL 且无本地缓存），"
               "C++ 编译降级跳过（CMake 仍可配置）")
         return None
-    print(f"[bsp_util] AX620E BSP 就绪: runtime={info['runtime_root']}")
+    print(f"[bsp_util] {bc_key} BSP 就绪: runtime={info['runtime_root']} "
+          f"gcc={info['cross_compiler'] or '未找到'}")
     return info
 
 
@@ -229,8 +357,10 @@ def ensure_bsp(target_hw: str = "AX650", cfg: dict | None = None,
     root = bsp_root(cfg)
     if hw.startswith("AX650"):
         return _ensure_ax650(root / "ax650", cfg, force)
+    if hw.startswith("AX630"):
+        return _ensure_chip(root / "ax630c", "ax630c", cfg, force)
     if hw.startswith("AX620"):
-        return _ensure_ax620e(root / "ax620e", cfg, force)
+        return _ensure_chip(root / "ax620e", "ax620q", cfg, force)
     print(f"[bsp_util] 未识别的目标芯片 {target_hw}，跳过 BSP 准备")
     return None
 

@@ -90,7 +90,7 @@ TASK_DIR/
 ## 模型获取
 
 - 模型下载/获取优先 ModelScope（国内 CDN 快，公开模型无需额外凭据），HuggingFace 仅作回退
-- 涉及 HF 的任何东西（模型权重、Pulsar2、AX650-Community-Hub、ModelZoo 等）先查
+- 涉及 HF 的任何东西（模型权重、Pulsar2、ModelZoo 等）先查
   ModelScope 有没有：`magnetar.net_util.modelscope_available("<org>/<name>")` 探测
   （HF repo id 与 ModelScope 约定一致，如 AXERA-TECH/Pulsar2 两侧都有），有则优先
   ModelScope 下载，没有才回退 HF/hf-mirror
@@ -134,9 +134,13 @@ STOP 前先向用户提议上 QAT（量化感知训练）；QAT 的框架选型/
   禁止每个模型重建完整 torch/transformers 大环境
 - 后续阶段解释器统一取 `magnetar.env_util.resolve_task_python(task_dir)`
 - BSP/交叉工具链也走公共目录：`magnetar.bsp_util.ensure_bsp(target_hw, cfg)` 自动
-  下载/解压 AX650 BSP SDK 到 `MAGNETAR_BSP_HOME`（默认 `~/.cache/magnetar/bsp`，
-  AX650 默认 ModelScope `AX650-Community-Hub` V3.10.2，`CXX_BSP_URL` 可覆盖），
-  探测 `AX_RUNTIME_ROOT` 与 aarch64 交叉编译器；C++ SDK 编译一律
+  下载/解压到 `MAGNETAR_BSP_HOME`（默认 `~/.cache/magnetar/bsp`）；SDK/runtime
+  下载地址按芯片从 ax-pipeline `scripts/build_common.sh` 解析（`MSP_URL_DEFAULT` /
+  `TOOLCHAIN_URL_DEFAULT`；AX650 为 msp_50_3.10.2.zip + Arm GNU 9.2 aarch64，
+  AX630C / AX620Q（AX620E NPU）为 msp_20e + build_common.sh 对应编译器
+  （AX620Q 为 ax620q_bsp_sdk uclibc）；`CXX_BSP_URL`/`CXX_TOOLCHAIN_URL` 可覆盖，
+  `BUILD_COMMON_SH_URL` 可换清单源），探测 `AX_RUNTIME_ROOT` 与交叉编译器；
+  C++ SDK 编译一律
   `magnetar.bsp_util.build_cpp_sdk(task_dir, cfg)`，禁止再手动找 ax_engine 头文件/库
 
 ### 编译
@@ -190,7 +194,8 @@ ONNX 必须静态 shape。编译前用 ONNX Runtime 验证。
 
 ## 爱芯开发知识
 
-完整资源清单见 `docs/ax-knowledge.md`（仅查证 URL/版本时按需读取，不随每轮全量加载）。
+完整资源清单见 `docs/ax-knowledge.md`（仅查证 URL/版本时按需读取，不随每轮全量加载；
+SDK/BSP 下载地址除外——按芯片查 ax-pipeline `build_common.sh`，ax-knowledge 不再收录）。
 
 ## Token 效率约定
 

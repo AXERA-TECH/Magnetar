@@ -17,6 +17,10 @@
 - 爱芯 GitHub: https://github.com/AXERA-TECH
 - 交叉编译器: https://github.com/AXERA-TECH/ax-samples/tree/main/docs
 - 获取BSP: https://github.com/AXERA-TECH/ax-pipeline/blob/main/scripts/build_common.sh
+  （BSP/runtime 与交叉编译器的下载地址按芯片 case 解析：`MSP_URL_DEFAULT` /
+  `TOOLCHAIN_URL_DEFAULT`）
+- 芯片命名：AX620E 是 NPU 芯片名称，对应 SoC 有 AX630C、AX620Q；这些 SoC 的
+  BSP 和交叉编译器都收录在 build_common.sh 里（ax630c / ax620q 两个 case）
 - LLM 编译: https://github.com/AXERA-TECH/ax-llm
 - ax-llm 分支: https://github.com/AXERA-TECH/ax-llm/tree/axllm（统一可执行文件名 axllm，
   AX650 片上 / AXCL PCIe 双后端）
