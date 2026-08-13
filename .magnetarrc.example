@@ -59,15 +59,20 @@ PULSAR2_HOME=
 # 留空默认 ~/.cache/magnetar/base-venv；任务薄 venv 经 .pth 链接复用
 # MAGNETAR_BASE_VENV=
 
-# BSP 公共目录（AX650 BSP SDK 自动下载到这里，含 include/lib + 交叉编译器）。
+# BSP 公共目录（BSP/runtime + 交叉编译器自动下载到这里，含 include/lib）。
 # 留空默认 ~/.cache/magnetar/bsp
 # MAGNETAR_BSP_HOME=
 
-# BSP 下载地址（AX650 默认 ModelScope AX650-Community-Hub；AX620E 必须显式给）
+# BSP/runtime 下载地址（默认按芯片解析 ax-pipeline build_common.sh 的
+# MSP_URL_DEFAULT：AX650 msp_50；AX630C / AX620Q（AX620E NPU）msp_20e。留空用默认）
 # CXX_BSP_URL=
 
-# aarch64 交叉编译器下载地址（AX650 默认 Arm GNU 9.2 官方地址）
+# 交叉编译器下载地址（默认按芯片取 build_common.sh 的 TOOLCHAIN_URL_DEFAULT：
+# AX650/AX630C Arm GNU 9.2 aarch64；AX620Q ax620q_bsp_sdk uclibc。留空用默认）
 # CXX_TOOLCHAIN_URL=
+
+# build_common.sh 清单地址（默认 GitHub raw，可换镜像/本地路径）
+# BUILD_COMMON_SH_URL=
 
 # ===== LLM / 自回归模型（ax-llm 路由，可选）=====
 # 模型被判定为自回归/类 LLM 时自动走 ax-llm 路径（pulsar2 llm_build2 + axllm），
@@ -87,14 +92,6 @@ PULSAR2_HOME=
 # LLM_WEIGHT_TYPE=s8        # s8 | s4 | bf16 | fp16 | fp32（大模型可试 s4）
 # LLM_HIDDEN_STATE_TYPE=bf16  # bf16 | fp16 | fp32
 
-# ===== C++ BSP / 交叉编译器 =====
-
-# AX650 BSP SDK 下载地址（留空使用默认）
-# CXX_BSP_URL=
-
-# AX620E 交叉编译器下载地址（留空使用默认）
-# CXX_BSP_URL=
-
 # ===== HuggingFace 凭据 =====
 
 # 私有模型访问令牌（留空则从环境变量 HF_TOKEN 读取）
@@ -113,7 +110,7 @@ PULSAR2_HOME=
 
 # ===== 国内镜像（默认值，海外用户可置空字符串恢复直连）=====
 
-# 涉及 HuggingFace 的内容（权重 / Pulsar2 / BSP SDK 等）先查 ModelScope：
+# 涉及 HuggingFace 的内容（权重 / Pulsar2 等）先查 ModelScope：
 #   magnetar.net_util.modelscope_available("<org>/<name>")，有则优先 ModelScope，无才回退 HF
 # HF 大文件下载默认用 hf-mirror 的 hfd（scripts/download_hf.sh），小文件单线即可
 

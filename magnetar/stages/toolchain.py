@@ -13,7 +13,7 @@ def run(cfg: dict | None = None, task_dir: str | Path | None = None) -> str:
     for name, path in files.items():
         print(f"  {name}: {path}")
 
-    # 公共 BSP：AX650 BSP SDK（含交叉编译器）或 AX620E BSP；路径固化到任务 config
+    # 公共 BSP：AX650 / AX630C / AX620Q（AX620E NPU），地址按芯片来自 build_common.sh
     bsp_info = None
     from magnetar.bsp_util import ensure_bsp
     bsp_info = ensure_bsp((cfg or {}).get("TARGET_HARDWARE", "AX650"), cfg)

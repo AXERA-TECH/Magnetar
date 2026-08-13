@@ -20,7 +20,7 @@ workflow:
         axmodel）+ AXERA-TECH/ax-llm（axllm 分支）板端运行/服务；通用模型仍走
         ONNX -> pulsar2 build 路径'
       - Pulsar2 Docker image fallback from https://hf-mirror.com/AXERA-TECH/Pulsar2/tree/main
-      - HF-hosted artifacts (model weights / Pulsar2 / BSP SDK) must first check ModelScope
+      - HF-hosted artifacts (model weights / Pulsar2) must first check ModelScope; BSP/runtime 地址按芯片解析自 build_common.sh
         (modelscope_available) and fall back to hf-mirror only when absent
       - 'HF large-file downloads use hf-mirror hfd: scripts/download_hf.sh
         <org>/<name> --local-dir origin/<name> -x 8'

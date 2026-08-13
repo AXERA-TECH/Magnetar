@@ -186,7 +186,7 @@ def _write_setup_sh(pkg: Path, has_py: bool, has_cpp: bool):
 
     if has_cpp:
         lines.append("")
-        lines.append('echo "C++ SDK: 请先安装 AX650 BSP SDK，然后："')
+        lines.append('echo "C++ SDK: 请先准备 BSP/runtime（地址见 ax-pipeline build_common.sh），然后："')
         lines.append("# export AX_RUNTIME_ROOT=/path/to/axruntime")
         lines.append("# mkdir -p cpp/build && cd cpp/build")
         lines.append('# cmake .. -DCMAKE_TOOLCHAIN_FILE=${AX_RUNTIME_ROOT}/toolchain.cmake')

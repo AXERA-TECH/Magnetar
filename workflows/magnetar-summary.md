@@ -90,7 +90,7 @@ PUBLISH 目标/仓库/凭据。
   （`python -m magnetar.env_util base`，`MAGNETAR_BASE_VENV` 可覆盖）；任务用
   `create_task_venv()` 建薄 venv（.pth 链接 base，任务包优先），VENV_PATH 固化进
   TASK_DIR/config.json，不重复装大包
-- BSP 公共目录：`magnetar.bsp_util.ensure_bsp()` 自动下载/解压 AX650 BSP SDK 到
+- BSP 公共目录：`magnetar.bsp_util.ensure_bsp()` 自动下载/解压 BSP/runtime 到
   `MAGNETAR_BSP_HOME`（默认 `~/.cache/magnetar/bsp`，含交叉编译器），探测
   AX_RUNTIME_ROOT 并固化进 config.json；C++ SDK 用 `build_cpp_sdk()` 一键交叉编译，
   不再人肉找 ax_engine 头文件/库；SDK/runtime 下载地址按芯片解析自 ax-pipeline
